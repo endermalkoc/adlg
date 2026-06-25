@@ -1,0 +1,46 @@
+ASDF — Agentic Software Development Framework
+Copyright (c) 2026 ASDF Contributors
+
+This product includes software developed by the Beads project.
+
+  beads — https://github.com/steveyegge/beads
+  Copyright (c) 2025 Beads Contributors
+  Licensed under the MIT License.
+
+The following packages were salvaged from beads (the MIT license terms are
+satisfied by retaining this notice). They provide ASDF's Dolt infrastructure:
+embedded/owned/external Dolt SQL server management, the warm "proxied server"
+daemon, and the version-control / remote / sync / federation operations. Import
+paths were rewritten from github.com/steveyegge/beads to
+github.com/endermalkoc/asdf, and dependencies on beads' issue domain were severed
+(see the surgery notes below).
+
+  internal/doltserver
+  internal/storage/dbproxy            (+ pidfile, proxy, server, util)
+  internal/storage/doltutil
+  internal/remotecache
+  internal/doltremote
+  internal/config
+  internal/configfile
+  internal/debug
+  internal/lockfile
+  internal/atomicfile
+  internal/storage                    (version-control contracts: version_control,
+                                       versioned, remote, sync, federation,
+                                       compaction, history_viewer)
+  internal/storage/versioncontrolops  (Dolt branch/commit/merge/clone/gc/flatten/
+                                       backup over a DBConn)
+  internal/storage/kvkeys
+
+Surgery applied when lifting the version-control tier:
+  - internal/storage/storage.go is a local shim; beads' issue-domain Storage
+    interface and internal/types were NOT lifted.
+  - versioncontrolops was decoupled from beads' issueops: the two pure helpers it
+    used (ValidateRef, IsNothingToCommitError) were relocated into
+    versioncontrolops/refutil.go.
+  - versioned.go, compaction.go, and history_viewer.go were genericized — beads'
+    *types.Issue / IssueSnapshot / CompactionCandidate were replaced with opaque
+    rows (map[string]any) and generic Node* types, and issueID became nodeID.
+  - merge_slot.go was NOT lifted: its lock is implemented as a beads Issue and it
+    drives the full issue Storage interface, so it is a domain feature rather than
+    Dolt infrastructure.

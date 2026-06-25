@@ -1,0 +1,69 @@
+# GoReleaser configuration — https://goreleaser.com
+# Cuts cross-platform binaries, archives, and checksums and publishes them to a
+# GitHub Release whenever a `v*` tag is pushed (see .github/workflows/release.yml).
+#
+# Try it locally without publishing:  make snapshot   (== goreleaser release --snapshot --clean)
+# Validate this file:                  make release-check
+version: 2
+
+project_name: asdf
+
+before:
+  hooks:
+    # `download` (not `tidy`) so the working tree stays clean — GoReleaser
+    # refuses to publish a release from a dirty git state.
+    - go mod download
+
+builds:
+  - id: asdf
+    main: ./cmd/asdf
+    binary: asdf
+    env:
+      - CGO_ENABLED=0 # pure-Go build → trivial cross-compilation, fully static binary
+    goos:
+      - linux
+      - darwin
+      - windows
+    goarch:
+      - amd64
+      - arm64
+    mod_timestamp: "{{ .CommitTimestamp }}" # reproducible builds
+    ldflags:
+      - -s -w
+      - -X main.version={{ .Version }}
+      - -X main.commit={{ .ShortCommit }}
+      - -X main.date={{ .Date }}
+
+archives:
+  - id: default
+    formats: [tar.gz]
+    name_template: "{{ .ProjectName }}_{{ .Version }}_{{ .Os }}_{{ .Arch }}"
+    format_overrides:
+      - goos: windows
+        formats: [zip]
+
+checksum:
+  name_template: "checksums.txt"
+
+snapshot:
+  version_template: "{{ incpatch .Version }}-next"
+
+changelog:
+  sort: asc
+  filters:
+    exclude:
+      - "^docs:"
+      - "^test:"
+      - "^chore:"
+      - "Merge pull request"
+      - "Merge branch"
+
+release:
+  draft: false
+  prerelease: auto # tags like v0.1.0-rc1 publish as a pre-release
+  footer: |
+    ## Install
+
+    ```sh
+    curl -fsSL https://raw.githubusercontent.com/endermalkoc/asdf/main/install.sh | sh
+    ```

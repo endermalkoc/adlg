@@ -1,0 +1,35 @@
+# ── Generated knowledge artifacts ──────────────────────────────────────────
+# ASDF renders Markdown + HTML from the Dolt DB (the source of truth).
+# These are disposable, always-regenerable, and MUST NOT be committed or edited.
+/generated/
+*.generated.md
+*.generated.html
+
+# ── Dolt working database ──────────────────────────────────────────────────
+# The knowledge store is its own versioned (Dolt) repo, not tracked by this git repo.
+.dolt/
+
+# ── Go build output ────────────────────────────────────────────────────────
+/asdf
+/dist/
+*.exe
+*.test
+*.out
+# VSCode / Delve debug binaries
+__debug_bin*
+
+# ── Agent / editor local config ────────────────────────────────────────────
+# Personal, machine-local Claude Code settings — never shared. (Shared project
+# config like .claude/settings.json IS committable, so don't ignore all of .claude/.)
+.claude/settings.local.json
+
+# ── Environment / secrets ──────────────────────────────────────────────────
+.env
+.env.local
+
+# ── OS / editor ────────────────────────────────────────────────────────────
+.DS_Store
+Thumbs.db
+*.swp
+.idea/
+.vscode/
