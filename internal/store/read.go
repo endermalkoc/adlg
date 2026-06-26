@@ -520,6 +520,53 @@ func ListEdgesOfKind(ctx context.Context, x Execer, kind string) ([]EdgeEndpoint
 	return out, rows.Err()
 }
 
+// EdgeRow is one edge with its kind — for impact / graph traversal.
+type EdgeRow struct{ FromType, FromID, ToType, ToID, Kind string }
+
+// ListAllEdges returns every edge on the current branch (all kinds).
+func ListAllEdges(ctx context.Context, x Execer) ([]EdgeRow, error) {
+	rows, err := x.QueryContext(ctx, "SELECT from_type, from_id, to_type, to_id, kind FROM `req_edge`")
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var out []EdgeRow
+	for rows.Next() {
+		var e EdgeRow
+		if err := rows.Scan(&e.FromType, &e.FromID, &e.ToType, &e.ToID, &e.Kind); err != nil {
+			return nil, err
+		}
+		out = append(out, e)
+	}
+	return out, rows.Err()
+}
+
+// EntityRefPair is one prose-derived reference as both endpoints (owner → target), by ids
+// — for impact traversal (which needs both directions).
+type EntityRefPair struct{ OwnerType, OwnerID, TargetType, TargetID string }
+
+// ListEntityRefsFor returns every entity_ref with the given node as either owner or
+// target — both directions of the prose-derived references touching it.
+func ListEntityRefsFor(ctx context.Context, x Execer, nodeType, nodeID string) ([]EntityRefPair, error) {
+	rows, err := x.QueryContext(ctx,
+		"SELECT owner_type, owner_id, target_type, target_id FROM `req_entity_ref` "+
+			"WHERE (owner_type=? AND owner_id=?) OR (target_type=? AND target_id=?)",
+		nodeType, nodeID, nodeType, nodeID)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var out []EntityRefPair
+	for rows.Next() {
+		var r EntityRefPair
+		if err := rows.Scan(&r.OwnerType, &r.OwnerID, &r.TargetType, &r.TargetID); err != nil {
+			return nil, err
+		}
+		out = append(out, r)
+	}
+	return out, rows.Err()
+}
+
 // DeliveryStatusRow is one delivery_status lookup row — a status value plus the
 // coverage policy it carries (read by a future check / coverage rollup).
 type DeliveryStatusRow struct {
