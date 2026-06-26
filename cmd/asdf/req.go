@@ -37,10 +37,8 @@ var reqAddCmd = &cobra.Command{
 		var r store.Requirement
 		var resolved app.ResolvedRefs
 		var statement string
-		err = app.Mutate(ctx, ws, app.MutateOpts{
-			Summary:   fmt.Sprintf("add requirement to %s", args[0]),
-			Changeset: flagChangeset,
-			Actor:     flagActor,
+		err = runMutate(cmd, ws, app.MutateOpts{
+			Summary: fmt.Sprintf("add requirement to %s", args[0]),
 			Validate: func(vctx context.Context, r store.Execer) error {
 				if note, e := app.ValidateEnumSoft("delivery status", reqDelivery, enums.RequirementDelivery, flagStrict); e != nil {
 					return e
@@ -143,7 +141,7 @@ var reqShowCmd = &cobra.Command{
 			return err
 		}
 		if !ok {
-			return fmt.Errorf("no requirement %q", args[0])
+			return app.NotFound("requirement", args[0])
 		}
 		if flagJSON {
 			emit(req, "")
@@ -188,17 +186,15 @@ var reqEditCmd = &cobra.Command{
 		}
 		var updated store.Requirement
 		var resolved app.ResolvedRefs
-		err = app.Mutate(ctx, ws, app.MutateOpts{
-			Summary:   "edit requirement " + frKey,
-			Changeset: flagChangeset,
-			Actor:     flagActor,
+		err = runMutate(cmd, ws, app.MutateOpts{
+			Summary: "edit requirement " + frKey,
 			Validate: func(vctx context.Context, r store.Execer) error {
 				cur, ok, e := store.GetRequirement(vctx, r, frKey)
 				if e != nil {
 					return e
 				}
 				if !ok {
-					return fmt.Errorf("no requirement %q", frKey)
+					return app.NotFound("requirement", frKey)
 				}
 				if changed("content-status") {
 					if e := app.ValidateEnum("content status", reqContentStatus, enums.ContentStatus); e != nil {
@@ -275,17 +271,15 @@ var reqDeleteCmd = &cobra.Command{
 		}
 		defer ws.Close()
 		var deleted store.Requirement
-		err = app.Mutate(ctx, ws, app.MutateOpts{
-			Summary:   "delete requirement " + args[0],
-			Changeset: flagChangeset,
-			Actor:     flagActor,
+		err = runMutate(cmd, ws, app.MutateOpts{
+			Summary: "delete requirement " + args[0],
 		}, func(ctx context.Context, w *app.Write) error {
 			d, ok, e := store.DeleteRequirement(ctx, w.Tx, args[0])
 			if e != nil {
 				return e
 			}
 			if !ok {
-				return fmt.Errorf("no requirement %q", args[0])
+				return app.NotFound("requirement", args[0])
 			}
 			deleted = d
 			w.MarkDirty("req_requirement")

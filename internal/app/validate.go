@@ -13,7 +13,7 @@ func ValidateEnum(field, value string, allowed []string) error {
 		return nil
 	}
 	if !enums.Valid(allowed, value) {
-		return fmt.Errorf("invalid %s %q (allowed: %v)", field, value, allowed)
+		return ValidationFailed(fmt.Errorf("invalid %s %q (allowed: %v)", field, value, allowed))
 	}
 	return nil
 }
@@ -21,7 +21,7 @@ func ValidateEnum(field, value string, allowed []string) error {
 // ValidateRequired checks that value is non-empty.
 func ValidateRequired(field, value string) error {
 	if value == "" {
-		return fmt.Errorf("%s is required", field)
+		return ValidationFailed(fmt.Errorf("%s is required", field))
 	}
 	return nil
 }
@@ -36,7 +36,7 @@ func ValidateEnumSoft(field, value string, allowed []string, strict bool) (note 
 		return "", nil
 	}
 	if strict {
-		return "", fmt.Errorf("invalid %s %q (allowed: %v; omit --strict to accept)", field, value, allowed)
+		return "", ValidationFailed(fmt.Errorf("invalid %s %q (allowed: %v; omit --strict to accept)", field, value, allowed))
 	}
 	return fmt.Sprintf("note: %s %q is outside the known set %v (accepted; --strict would reject)", field, value, allowed), nil
 }

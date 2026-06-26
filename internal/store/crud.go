@@ -137,31 +137,41 @@ func DeleteSpec(ctx context.Context, x Execer, key string) (SpecRow, bool, error
 	if err != nil || !ok {
 		return SpecRow{}, ok, err
 	}
-	reqIDs, err := childIDs(ctx, x, "SELECT id FROM `req_requirement` WHERE spec_id=?", sp.ID)
-	if err != nil {
+	if err := deleteSpecByID(ctx, x, sp.ID); err != nil {
 		return SpecRow{}, false, err
 	}
-	storyIDs, err := childIDs(ctx, x, "SELECT id FROM `req_user_story` WHERE spec_id=?", sp.ID)
+	return sp, true, nil
+}
+
+// deleteSpecByID cleans the polymorphic refs of the spec and each of its cascade-deleted
+// requirements/user-stories, then deletes the row (the DB cascades requirements, sections,
+// groups, stories and scenarios). Shared by DeleteSpec and DeleteDomain.
+func deleteSpecByID(ctx context.Context, x Execer, specID string) error {
+	reqIDs, err := childIDs(ctx, x, "SELECT id FROM `req_requirement` WHERE spec_id=?", specID)
 	if err != nil {
-		return SpecRow{}, false, err
+		return err
 	}
-	if err := DeleteNodeRefs(ctx, x, "spec", sp.ID); err != nil {
-		return SpecRow{}, false, err
+	storyIDs, err := childIDs(ctx, x, "SELECT id FROM `req_user_story` WHERE spec_id=?", specID)
+	if err != nil {
+		return err
+	}
+	if err := DeleteNodeRefs(ctx, x, "spec", specID); err != nil {
+		return err
 	}
 	for _, id := range reqIDs {
 		if err := DeleteNodeRefs(ctx, x, "requirement", id); err != nil {
-			return SpecRow{}, false, err
+			return err
 		}
 	}
 	for _, id := range storyIDs {
 		if err := DeleteNodeRefs(ctx, x, "user_story", id); err != nil {
-			return SpecRow{}, false, err
+			return err
 		}
 	}
-	if _, err := x.ExecContext(ctx, "DELETE FROM `req_spec` WHERE id=?", sp.ID); err != nil {
-		return SpecRow{}, false, fmt.Errorf("delete spec %s: %w", key, err)
+	if _, err := x.ExecContext(ctx, "DELETE FROM `req_spec` WHERE id=?", specID); err != nil {
+		return fmt.Errorf("delete spec %s: %w", specID, err)
 	}
-	return sp, true, nil
+	return nil
 }
 
 // ---- integrity check sources ----------------------------------------------

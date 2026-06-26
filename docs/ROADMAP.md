@@ -47,14 +47,22 @@ What's built and what's next. A living document — pairs with [ARCHITECTURE.md]
   supersedes/defers_to) while permitting them for references/relates (`app.ResolveRef` +
   `app.CheckEdgeAcyclic` + `store.ListEdgesOfKind`). **Deferred:** per-kind *type* policy (which
   endpoint types a given kind may link) — left generic for now.
-- **`--dry-run` flag** — `Mutate` already supports it; expose it on the CLI.
-- **Structured errors → exit codes** + a `--json` error envelope.
-- **Broaden CRUD** — **`req` + `spec` `show`/`edit`/`delete` DONE.** `edit` re-runs the shared
-  canonicalize→validate→reconcile-refs layer (req statement); `delete` removes the row and every
-  polymorphic reference touching it (`store.DeleteNodeRefs` over entity_refs/edges/external_refs) —
-  spec delete also relies on the FK cascade for child requirements/sections/stories and cleans each
-  child's refs. **Remaining:** `domain`/`term`/`edge`/`section`/`entity` show/edit/delete, then the
-  not-yet-CRUD'd entities (Milestone, Test*, Capability, Deliverable, View, ExternalRef).
+- **`--dry-run` flag — DONE.** Global `--dry-run` injected by the `runMutate` CLI wrapper over
+  `Mutate`'s `DryRun`: validates + previews, then rolls back; prints a `[dry-run] … no changes were
+  committed` note.
+- **Structured errors → exit codes — DONE.** `app.CodedError` tags failures at the source
+  (validation=2, not_found=3, dangling_ref=4, generic=1); `Execute` maps the exit code and, under
+  `--json`, emits an `{"error":{code,category,message}}` envelope on stdout. See
+  [command-contract.md](command-contract.md).
+- **Broaden CRUD — core surface DONE.** `show`/`edit`/`delete` for **req, spec, domain, entity,
+  glossary-term**; plus **edge `ls`/`delete`** and **section `delete`**. `edit` re-runs the shared
+  canonicalize→validate→reconcile-refs layer (req statement, term definition); `delete` removes the
+  row and every polymorphic reference touching it (`store.DeleteNodeRefs` over
+  entity_refs/edges/external_refs), relying on FK cascade for structured children (spec→requirements/
+  sections/stories; domain→specs via explicit `deleteSpecByID`; entity→sections) and cleaning non-FK
+  junctions (entity relationships, glossary aliases). All honor `--dry-run` + exit codes + the active
+  changeset. **Remaining:** the not-yet-modeled-as-CRUD entities (Milestone, Test*, Capability,
+  Deliverable, View, ExternalRef).
 - **`asdf config get/set`** — `internal/config`/`configfile` are lifted but have no CLI yet.
 - **Reads honor the active changeset — DONE.** `ls`/`show` reads (and the `Mutate` validation hook's
   existence/ref checks) now run on the resolved target branch (`--changeset` → active changeset →

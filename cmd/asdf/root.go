@@ -3,6 +3,7 @@ package main
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"os"
 
@@ -20,6 +21,7 @@ var (
 	flagChangeset string
 	flagForce     bool
 	flagStrict    bool
+	flagDryRun    bool
 )
 
 var rootCmd = &cobra.Command{
@@ -38,14 +40,47 @@ func init() {
 	rootCmd.PersistentFlags().StringVar(&flagChangeset, "changeset", "", "target this changeset branch (default: the active changeset, else commit to main)")
 	rootCmd.PersistentFlags().BoolVar(&flagForce, "force", false, "write even when an inline [[TYPE:key]] cross-reference is unresolved (dangling)")
 	rootCmd.PersistentFlags().BoolVar(&flagStrict, "strict", false, "reject (instead of warn) values outside a seed value-set (kind, delivery status, …)")
+	rootCmd.PersistentFlags().BoolVar(&flagDryRun, "dry-run", false, "validate and preview a mutation, then roll back without committing")
+	rootCmd.PersistentPostRun = func(cmd *cobra.Command, args []string) {
+		if flagDryRun {
+			fmt.Fprintln(os.Stderr, "[dry-run] preview only — no changes were committed")
+		}
+	}
 }
 
-// Execute runs the CLI.
+// runMutate routes a mutating command through app.Mutate, injecting the global flags
+// (--changeset / --actor / --dry-run) so no command repeats them and every command honors
+// them by construction. Under --dry-run the body runs and validates, then rolls back —
+// nothing is committed.
+func runMutate(cmd *cobra.Command, ws *workspace.Workspace, o app.MutateOpts, body func(context.Context, *app.Write) error) error {
+	o.Changeset = flagChangeset
+	o.Actor = flagActor
+	o.DryRun = flagDryRun
+	return app.Mutate(cmd.Context(), ws, o, body)
+}
+
+// Execute runs the CLI. On failure it maps the error to a documented exit code (see
+// docs/command-contract.md) and, under --json, emits a structured error envelope on
+// stdout; otherwise a plain "error: …" line on stderr.
 func Execute() {
-	if err := rootCmd.ExecuteContext(context.Background()); err != nil {
-		fmt.Fprintln(os.Stderr, "error:", err)
-		os.Exit(1)
+	err := rootCmd.ExecuteContext(context.Background())
+	if err == nil {
+		return
 	}
+	code, category := app.ExitGeneric, "error"
+	var ce *app.CodedError
+	if errors.As(err, &ce) {
+		code, category = ce.Code, ce.Category
+	}
+	if flagJSON {
+		b, _ := json.MarshalIndent(map[string]any{
+			"error": map[string]any{"code": code, "category": category, "message": err.Error()},
+		}, "", "  ")
+		fmt.Fprintln(os.Stdout, string(b))
+	} else {
+		fmt.Fprintln(os.Stderr, "error:", err.Error())
+	}
+	os.Exit(code)
 }
 
 // connect opens the workspace: managed (owned) server by default, or the

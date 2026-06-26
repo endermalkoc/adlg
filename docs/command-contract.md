@@ -62,6 +62,27 @@ Every mutating command MUST, in order:
 
 (Reads never write, commit, or mutate working-set state.)
 
+## `--dry-run` and exit codes
+
+Every mutating command accepts the global `--dry-run` flag: the body runs and validates inside a
+transaction, then rolls back — nothing is committed (the CLI prints a `[dry-run] … no changes were
+committed` note). It is injected once by the `runMutate` CLI wrapper (`cmd/asdf/root.go`), not per
+command, over `app.Mutate`'s existing `DryRun`.
+
+Failures map to documented **exit codes** (and, under `--json`, a structured error envelope
+`{"error":{"code","category","message"}}` on stdout):
+
+| code | category       | when |
+|------|----------------|------|
+| 0    | —              | success |
+| 1    | `error`        | generic / uncategorized failure |
+| 2    | `validation`   | invalid enum / missing required field (`app.ValidateEnum`/`ValidateRequired`/strict soft) |
+| 3    | `not_found`    | a named entity does not exist (`app.NotFound`/`NotFoundErr`) |
+| 4    | `dangling_ref` | an inline `[[TYPE:key]]` cross-reference does not resolve (`app.DanglingError`) |
+
+Errors are tagged at their source via `app.CodedError`; `Execute` (`cmd/asdf/root.go`) maps the
+code and renders the envelope. Uncategorized errors stay exit 1.
+
 ## Current status (the slice vs the contract)
 
 The wrapper exists (`internal/app.Mutate`) and the slice now routes through it. `domain`/`spec`/
@@ -70,10 +91,9 @@ target resolution, validation, transaction, mint, attribution + timestamps, and 
 commit with actor+message. `asdf init` bootstraps the workspace; `asdf changeset
 start/diff/submit/merge/abandon/ls` provide the PR flow. Reads (`ls`) follow the read contract.
 
-Partial / still open (tracked in [ROADMAP.md](ROADMAP.md)): structured error→exit-code mapping is
-minimal; `--dry-run` is supported by `Mutate` but not yet exposed as a CLI flag; graph integrity
-(edge cycle detection / polymorphic endpoint checks) and hooks are not built. New commands
-inherit the full workflow by construction — this doc remains the review checklist.
+Structured error→exit-code mapping and `--dry-run` are now wired (above); graph integrity (edge
+cycle detection / polymorphic endpoint checks) is built; hooks are not. New commands inherit the
+full workflow by construction — this doc remains the review checklist.
 
 See also: [decisions.md — Changeset model](entities/decisions.md), [ROADMAP.md](ROADMAP.md) gaps,
 [ARCHITECTURE.md](ARCHITECTURE.md).

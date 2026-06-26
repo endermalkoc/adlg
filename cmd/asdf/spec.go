@@ -36,10 +36,8 @@ var specAddCmd = &cobra.Command{
 		var sp store.Spec
 		var resolved app.ResolvedRefs
 		var title string
-		err = app.Mutate(ctx, ws, app.MutateOpts{
-			Summary:   fmt.Sprintf("add spec %s", args[0]),
-			Changeset: flagChangeset,
-			Actor:     flagActor,
+		err = runMutate(cmd, ws, app.MutateOpts{
+			Summary: fmt.Sprintf("add spec %s", args[0]),
 			Validate: func(vctx context.Context, r store.Execer) error {
 				if err := app.ValidateRequired("domain", specDomain); err != nil {
 					return err
@@ -107,7 +105,7 @@ var specShowCmd = &cobra.Command{
 			return err
 		}
 		if !ok {
-			return fmt.Errorf("no spec %q", args[0])
+			return app.NotFound("spec", args[0])
 		}
 		if flagJSON {
 			emit(sp, "")
@@ -145,17 +143,15 @@ var specEditCmd = &cobra.Command{
 			return fmt.Errorf("nothing to edit — pass --title and/or --status")
 		}
 		var updated store.SpecRow
-		err = app.Mutate(ctx, ws, app.MutateOpts{
-			Summary:   "edit spec " + args[0],
-			Changeset: flagChangeset,
-			Actor:     flagActor,
+		err = runMutate(cmd, ws, app.MutateOpts{
+			Summary: "edit spec " + args[0],
 			Validate: func(vctx context.Context, r store.Execer) error {
 				cur, ok, e := store.GetSpec(vctx, r, args[0])
 				if e != nil {
 					return e
 				}
 				if !ok {
-					return fmt.Errorf("no spec %q", args[0])
+					return app.NotFound("spec", args[0])
 				}
 				if cmd.Flags().Changed("status") {
 					if e := app.ValidateEnum("status", specStatus, enums.SpecStatus); e != nil {
@@ -196,17 +192,15 @@ var specDeleteCmd = &cobra.Command{
 		}
 		defer ws.Close()
 		var deleted store.SpecRow
-		err = app.Mutate(ctx, ws, app.MutateOpts{
-			Summary:   "delete spec " + args[0],
-			Changeset: flagChangeset,
-			Actor:     flagActor,
+		err = runMutate(cmd, ws, app.MutateOpts{
+			Summary: "delete spec " + args[0],
 		}, func(ctx context.Context, w *app.Write) error {
 			d, ok, e := store.DeleteSpec(ctx, w.Tx, args[0])
 			if e != nil {
 				return e
 			}
 			if !ok {
-				return fmt.Errorf("no spec %q", args[0])
+				return app.NotFound("spec", args[0])
 			}
 			deleted = d
 			// The spec row + every table the FK cascade touches + the polymorphic ref

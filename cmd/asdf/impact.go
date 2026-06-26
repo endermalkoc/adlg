@@ -33,7 +33,7 @@ var impactCmd = &cobra.Command{
 		}
 		subject, ok := app.ResolveRef(resolver, args[0])
 		if !ok {
-			return fmt.Errorf("unknown entity %q — use TYPE:key (e.g. REQ:ATT-FR-012, SPEC:ADDS, ENTITY:Student)", args[0])
+			return app.NotFoundErr(fmt.Errorf("unknown entity %q — use TYPE:key (e.g. REQ:ATT-FR-012, SPEC:ADDS, ENTITY:Student)", args[0]))
 		}
 		rep, err := app.Impact(ctx, r, subject, impactTransitive)
 		if err != nil {

@@ -65,10 +65,8 @@ var importTutorCmd = &cobra.Command{
 		}
 		defer ws.Close()
 		var stats *importer.ApplyStats
-		err = app.Mutate(ctx, ws, app.MutateOpts{
-			Summary:   fmt.Sprintf("import tutor corpus (%d specs, %d requirements)", rep.Counts["specs"], rep.Counts["requirements"]),
-			Changeset: flagChangeset,
-			Actor:     flagActor,
+		err = runMutate(cmd, ws, app.MutateOpts{
+			Summary: fmt.Sprintf("import tutor corpus (%d specs, %d requirements)", rep.Counts["specs"], rep.Counts["requirements"]),
 		}, func(ctx context.Context, w *app.Write) error {
 			s, e := importer.Apply(ctx, w.Tx, g)
 			if e != nil {

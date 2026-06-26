@@ -67,7 +67,8 @@ func DanglingError(d []refs.Token) error {
 	for i, t := range d {
 		raws[i] = t.Raw
 	}
-	return fmt.Errorf("unresolved cross-reference(s): %s (use --force to write anyway)", strings.Join(raws, ", "))
+	return coded(ExitDangling, "dangling_ref",
+		fmt.Errorf("unresolved cross-reference(s): %s (use --force to write anyway)", strings.Join(raws, ", ")))
 }
 
 // ReconcileRefs replaces an owner's entity_ref rows with the given resolved targets

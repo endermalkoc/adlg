@@ -32,22 +32,9 @@ type ImpactReport struct {
 // set, it also computes the reverse-edge closure (everything that transitively depends on
 // the subject through edges).
 func Impact(ctx context.Context, x store.Execer, subject refs.Target, transitive bool) (ImpactReport, error) {
-	targets, err := store.ListRefTargets(ctx, x)
+	lbl, err := LabelIndex(ctx, x)
 	if err != nil {
 		return ImpactReport{}, err
-	}
-	label := map[string]string{} // type\x00id → "type:key"
-	for _, t := range targets {
-		k := t.Type + "\x00" + t.ID
-		if _, ok := label[k]; !ok { // first wins (specs are listed by prefix before path)
-			label[k] = t.Type + ":" + t.Key
-		}
-	}
-	lbl := func(typ, id string) string {
-		if l, ok := label[typ+"\x00"+id]; ok {
-			return l
-		}
-		return typ + ":" + id // user_story and other non-ref-target types
 	}
 
 	rep := ImpactReport{Subject: subject.Type + ":" + subject.Key}
@@ -116,6 +103,29 @@ func Impact(ctx context.Context, x store.Execer, subject refs.Target, transitive
 	sortLinks(rep.Inbound)
 	sortLinks(rep.Outbound)
 	return rep, nil
+}
+
+// LabelIndex builds a reverse lookup from an entity's (type, id) to a readable "type:key"
+// label, from the store's ref targets — for rendering graph endpoints (impact, edge ls).
+// A (type, id) that is not a ref target (e.g. a user_story) falls back to "type:id". For
+// specs, the prefix label wins over the path (it is listed first).
+func LabelIndex(ctx context.Context, x store.Execer) (func(typ, id string) string, error) {
+	targets, err := store.ListRefTargets(ctx, x)
+	if err != nil {
+		return nil, err
+	}
+	label := make(map[string]string, len(targets))
+	for _, t := range targets {
+		if k := t.Type + "\x00" + t.ID; label[k] == "" {
+			label[k] = t.Type + ":" + t.Key
+		}
+	}
+	return func(typ, id string) string {
+		if l, ok := label[typ+"\x00"+id]; ok {
+			return l
+		}
+		return typ + ":" + id
+	}, nil
 }
 
 func sortLinks(ls []ImpactLink) {

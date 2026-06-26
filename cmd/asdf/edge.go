@@ -3,6 +3,7 @@ package main
 import (
 	"context"
 	"fmt"
+	"strings"
 
 	"github.com/spf13/cobra"
 
@@ -36,10 +37,8 @@ var edgeAddCmd = &cobra.Command{
 		from, kind, to := args[0], args[1], args[2]
 		var fromT, toT refs.Target
 		var id string
-		err = app.Mutate(ctx, ws, app.MutateOpts{
-			Summary:   fmt.Sprintf("link %s %s %s", from, kind, to),
-			Changeset: flagChangeset,
-			Actor:     flagActor,
+		err = runMutate(cmd, ws, app.MutateOpts{
+			Summary: fmt.Sprintf("link %s %s %s", from, kind, to),
 			Validate: func(vctx context.Context, r store.Execer) error {
 				if e := app.ValidateEnum("edge kind", kind, enums.EdgeKind); e != nil {
 					return e
@@ -50,10 +49,10 @@ var edgeAddCmd = &cobra.Command{
 				}
 				var ok bool
 				if fromT, ok = app.ResolveRef(resolver, from); !ok {
-					return fmt.Errorf("unknown from-endpoint %q — use TYPE:key (e.g. SPEC:ADDS, ENTITY:Student, REQ:ATT-FR-012)", from)
+					return app.NotFoundErr(fmt.Errorf("unknown from-endpoint %q — use TYPE:key (e.g. SPEC:ADDS, ENTITY:Student, REQ:ATT-FR-012)", from))
 				}
 				if toT, ok = app.ResolveRef(resolver, to); !ok {
-					return fmt.Errorf("unknown to-endpoint %q — use TYPE:key (e.g. SPEC:ADDS, ENTITY:Student, REQ:ATT-FR-012)", to)
+					return app.NotFoundErr(fmt.Errorf("unknown to-endpoint %q — use TYPE:key (e.g. SPEC:ADDS, ENTITY:Student, REQ:ATT-FR-012)", to))
 				}
 				return app.CheckEdgeAcyclic(vctx, r, fromT.Type, fromT.ID, kind, toT.Type, toT.ID, from, to)
 			},
@@ -77,7 +76,88 @@ var edgeAddCmd = &cobra.Command{
 	},
 }
 
+var edgeLsCmd = &cobra.Command{
+	Use:   "ls",
+	Short: "List all edges (resolved endpoints)",
+	Args:  cobra.NoArgs,
+	RunE: func(cmd *cobra.Command, args []string) error {
+		ctx := cmd.Context()
+		rd, done, err := connectRead(ctx)
+		if err != nil {
+			return err
+		}
+		defer done()
+		edges, err := store.ListAllEdges(ctx, rd)
+		if err != nil {
+			return err
+		}
+		if flagJSON {
+			emit(edges, "")
+			return nil
+		}
+		lbl, err := app.LabelIndex(ctx, rd)
+		if err != nil {
+			return err
+		}
+		var b strings.Builder
+		for _, e := range edges {
+			fmt.Fprintf(&b, "%-28s -%s-> %s\n", lbl(e.FromType, e.FromID), e.Kind, lbl(e.ToType, e.ToID))
+		}
+		fmt.Print(b.String())
+		return nil
+	},
+}
+
+var edgeDeleteCmd = &cobra.Command{
+	Use:   "delete <from> <kind> <to>",
+	Short: "Delete an edge (same endpoint syntax as add)",
+	Args:  cobra.ExactArgs(3),
+	RunE: func(cmd *cobra.Command, args []string) error {
+		ctx := cmd.Context()
+		ws, err := connect(ctx)
+		if err != nil {
+			return err
+		}
+		defer ws.Close()
+		from, kind, to := args[0], args[1], args[2]
+		var fromT, toT refs.Target
+		err = runMutate(cmd, ws, app.MutateOpts{
+			Summary: fmt.Sprintf("unlink %s %s %s", from, kind, to),
+			Validate: func(vctx context.Context, r store.Execer) error {
+				resolver, e := app.LoadResolver(vctx, r)
+				if e != nil {
+					return e
+				}
+				var ok bool
+				if fromT, ok = app.ResolveRef(resolver, from); !ok {
+					return app.NotFoundErr(fmt.Errorf("unknown from-endpoint %q", from))
+				}
+				if toT, ok = app.ResolveRef(resolver, to); !ok {
+					return app.NotFoundErr(fmt.Errorf("unknown to-endpoint %q", to))
+				}
+				return nil
+			},
+		}, func(ctx context.Context, w *app.Write) error {
+			ok, e := store.DeleteEdgeByEndpoints(ctx, w.Tx, fromT.Type, fromT.ID, kind, toT.Type, toT.ID)
+			if e != nil {
+				return e
+			}
+			if !ok {
+				return app.NotFoundErr(fmt.Errorf("no %s edge from %s:%s to %s:%s", kind, fromT.Type, fromT.Key, toT.Type, toT.Key))
+			}
+			w.MarkDirty("req_edge")
+			return nil
+		})
+		if err != nil {
+			return err
+		}
+		emit(map[string]string{"from": fromT.Type + ":" + fromT.Key, "kind": kind, "to": toT.Type + ":" + toT.Key},
+			fmt.Sprintf("deleted edge: %s:%s -%s-> %s:%s", fromT.Type, fromT.Key, kind, toT.Type, toT.Key))
+		return nil
+	},
+}
+
 func init() {
-	edgeCmd.AddCommand(edgeAddCmd)
+	edgeCmd.AddCommand(edgeAddCmd, edgeLsCmd, edgeDeleteCmd)
 	rootCmd.AddCommand(edgeCmd)
 }

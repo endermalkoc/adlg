@@ -36,6 +36,7 @@ type sectionNS struct {
 	listTypes     func(context.Context, store.Execer) ([]store.SectionTypeRow, error)
 	upsertType    func(context.Context, store.Execer, store.SectionTypeRow) (bool, error)
 	upsertSection func(context.Context, store.Execer, string, string, string) (string, bool, error)
+	deleteSection func(context.Context, store.Execer, string, string) (bool, error)
 	listSections  func(context.Context, store.Execer, string) ([]store.SectionRow, error)
 	sectionTable  string
 	typeTable     string
@@ -86,17 +87,15 @@ func (ns sectionNS) sectionCmd() *cobra.Command {
 				return err
 			}
 			var ownerID string
-			err = app.Mutate(ctx, ws, app.MutateOpts{
-				Summary:   fmt.Sprintf("set %s section %s/%s", ns.noun, args[0], flagSectionType),
-				Changeset: flagChangeset,
-				Actor:     flagActor,
+			err = runMutate(cmd, ws, app.MutateOpts{
+				Summary: fmt.Sprintf("set %s section %s/%s", ns.noun, args[0], flagSectionType),
 				Validate: func(vctx context.Context, r store.Execer) error {
 					id, ok, e := ns.resolveOwner(vctx, r, args[0])
 					if e != nil {
 						return e
 					}
 					if !ok {
-						return fmt.Errorf("unknown %s %q", ns.noun, args[0])
+						return app.NotFoundErr(fmt.Errorf("unknown %s %q", ns.noun, args[0]))
 					}
 					ownerID = id
 					// Friction: the section type must already exist; there is no inline
@@ -143,7 +142,7 @@ func (ns sectionNS) sectionCmd() *cobra.Command {
 				return err
 			}
 			if !ok {
-				return fmt.Errorf("unknown %s %q", ns.noun, args[0])
+				return app.NotFoundErr(fmt.Errorf("unknown %s %q", ns.noun, args[0]))
 			}
 			secs, err := ns.listSections(ctx, r, id)
 			if err != nil {
@@ -162,7 +161,56 @@ func (ns sectionNS) sectionCmd() *cobra.Command {
 		},
 	}
 
-	parent.AddCommand(addCmd, lsCmd)
+	delCmd := &cobra.Command{
+		Use:   "delete " + ns.ownerArg + " --type <key>",
+		Short: "Remove a " + ns.noun + " section",
+		Args:  cobra.ExactArgs(1),
+		RunE: func(cmd *cobra.Command, args []string) error {
+			ctx := cmd.Context()
+			ws, err := connect(ctx)
+			if err != nil {
+				return err
+			}
+			defer ws.Close()
+			if flagSectionType == "" {
+				return fmt.Errorf("--type is required")
+			}
+			var ownerID string
+			err = runMutate(cmd, ws, app.MutateOpts{
+				Summary: fmt.Sprintf("delete %s section %s/%s", ns.noun, args[0], flagSectionType),
+				Validate: func(vctx context.Context, r store.Execer) error {
+					id, ok, e := ns.resolveOwner(vctx, r, args[0])
+					if e != nil {
+						return e
+					}
+					if !ok {
+						return app.NotFoundErr(fmt.Errorf("unknown %s %q", ns.noun, args[0]))
+					}
+					ownerID = id
+					return nil
+				},
+			}, func(ctx context.Context, w *app.Write) error {
+				ok, e := ns.deleteSection(ctx, w.Tx, ownerID, flagSectionType)
+				if e != nil {
+					return e
+				}
+				if !ok {
+					return app.NotFoundErr(fmt.Errorf("no %q section on %s %q", flagSectionType, ns.noun, args[0]))
+				}
+				w.MarkDirty(ns.sectionTable)
+				return nil
+			})
+			if err != nil {
+				return err
+			}
+			emit(map[string]string{ns.noun: args[0], "type": flagSectionType},
+				fmt.Sprintf("deleted %s section %s [%s]", ns.noun, args[0], flagSectionType))
+			return nil
+		},
+	}
+	delCmd.Flags().StringVar(&flagSectionType, "type", "", "section type key to remove")
+
+	parent.AddCommand(addCmd, lsCmd, delCmd)
 	return parent
 }
 
@@ -185,10 +233,8 @@ func (ns sectionNS) sectionTypeCmd() *cobra.Command {
 				Key: args[0], Title: flagTypeTitle, Level: flagTypeLevel,
 				Position: flagTypePosition, Description: flagTypeDescription, Origin: "authored",
 			}
-			err = app.Mutate(ctx, ws, app.MutateOpts{
-				Summary:   fmt.Sprintf("add %s section type %s", ns.noun, args[0]),
-				Changeset: flagChangeset,
-				Actor:     flagActor,
+			err = runMutate(cmd, ws, app.MutateOpts{
+				Summary: fmt.Sprintf("add %s section type %s", ns.noun, args[0]),
 			}, func(ctx context.Context, w *app.Write) error {
 				if _, e := ns.upsertType(ctx, w.Tx, t); e != nil {
 					return e
@@ -252,6 +298,7 @@ func init() {
 		listTypes:     store.ListSpecSectionTypes,
 		upsertType:    store.UpsertSpecSectionType,
 		upsertSection: store.UpsertSpecSection,
+		deleteSection: store.DeleteSpecSection,
 		listSections:  store.ListSpecSections,
 		sectionTable:  "req_spec_section", typeTable: "req_spec_section_type",
 	}
@@ -262,6 +309,7 @@ func init() {
 		listTypes:     store.ListEntitySectionTypes,
 		upsertType:    store.UpsertEntitySectionType,
 		upsertSection: store.UpsertEntitySection,
+		deleteSection: store.DeleteEntitySection,
 		listSections:  store.ListEntitySections,
 		sectionTable:  "ent_entity_section", typeTable: "ent_entity_section_type",
 	}
