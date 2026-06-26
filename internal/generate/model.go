@@ -12,11 +12,11 @@ import (
 // store: assembly and formatting are separate concerns. The JSON tags double as the JSON
 // serialization shape.
 type Model struct {
-	Domains    []*Domain     `json:"domains"`
-	Specs      []*Spec       `json:"specs"`
-	Entities   []*Entity     `json:"entities"`
-	Terms      []*Term       `json:"glossary,omitempty"`
-	Targets    []refs.Target `json:"-"` // inline-ref resolution (doc renderers); not serialized
+	Domains    []*Domain      `json:"domains"`
+	Specs      []*Spec        `json:"specs"`
+	Entities   []*Entity      `json:"entities"`
+	Terms      []*Term        `json:"glossary,omitempty"`
+	Targets    []refs.Target  `json:"-"` // inline-ref resolution (doc renderers); not serialized
 	Priorities map[int]string `json:"-"` // level → label
 }
 
@@ -33,6 +33,7 @@ type Domain struct {
 // extension as needed.
 type Spec struct {
 	Prefix       string         `json:"prefix,omitempty"`
+	Slug         string         `json:"slug,omitempty"`
 	Title        string         `json:"title,omitempty"`
 	Domain       string         `json:"domain"`
 	Status       string         `json:"status"`
@@ -132,7 +133,7 @@ func Load(ctx context.Context, x store.Execer) (*Model, error) {
 	}
 	for _, sr := range specRows {
 		sp := &Spec{
-			Prefix: sr.Prefix, Title: sr.Title, Domain: sr.DomainSlug, Status: sr.Status,
+			Prefix: sr.Prefix, Slug: sr.Slug, Title: sr.Title, Domain: sr.DomainSlug, Status: sr.Status,
 			Path: store.SpecDocPath(sr.DomainSlug, sr.Path, sr.Slug),
 		}
 		secRows, err := store.ListSpecSections(ctx, x, sr.ID)
@@ -222,4 +223,26 @@ func toSections(rows []store.SectionRow) []*Section {
 		out[i] = &Section{Key: r.Key, Title: r.Title, Level: r.Level, Position: r.Position, Body: r.Body}
 	}
 	return out
+}
+
+// toTargets adapts store ref-target rows to the refs resolver's Target shape.
+func toTargets(rows []store.RefTargetRow) []refs.Target {
+	out := make([]refs.Target, len(rows))
+	for i, r := range rows {
+		out[i] = refs.Target{Type: r.Type, Key: r.Key, ID: r.ID, DocPath: r.DocPath, Anchor: r.Anchor}
+	}
+	return out
+}
+
+// loadPriorityLabels loads the level→label map for the 0–4 priority taxonomy.
+func loadPriorityLabels(ctx context.Context, x store.Execer) (map[int]string, error) {
+	rows, err := store.ListPriorities(ctx, x)
+	if err != nil {
+		return nil, err
+	}
+	m := make(map[int]string, len(rows))
+	for _, p := range rows {
+		m[p.Level] = p.Label
+	}
+	return m, nil
 }

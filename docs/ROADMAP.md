@@ -21,7 +21,10 @@ What's built and what's next. A living document — pairs with [ARCHITECTURE.md]
 - **Command contract** (`internal/app.Mutate`) — every mutating command: managed connect →
   resolve changeset/`main` target → validate → transaction → mint → attribute/timestamp → real
   Dolt commit with actor+message (clean working set). Bad input fails before any write.
-- **Entity CRUD (slice)** — `domain`/`spec`/`req`/`edge` `add` + `ls`.
+- **Entity CRUD** — `add`/`ls`/`show`/`edit`/`delete` across `domain`/`spec`/`req`/`entity`/`term`
+  (+ `edge add`/`ls`/`delete`, `section add`/`ls`/`delete`); `edit` re-runs the shared
+  canonicalize→validate→reconcile-refs layer; `delete` cleans polymorphic refs + FK cascades. All
+  honor `--dry-run` / exit-codes / the active changeset (see "Broaden CRUD" below for the detail).
 - **Changesets (the PR model)** — `asdf changeset start/diff/submit/merge/abandon/ls`: a changeset
   is a Dolt branch; edits route to the active changeset; `diff` is the combined PR view; edits stay
   isolated from `main` until merge; `Changeset`/`Review` rows live on `main`.
@@ -76,9 +79,10 @@ What's built and what's next. A living document — pairs with [ARCHITECTURE.md]
 | Feature | What | Status / notes |
 |---|---|---|
 | **Remote sync** | `asdf dolt push/pull/remote/clone`, `asdf sync`, federation (peers) | **requested.** Infra lifted (`remotecache`, `doltutil` remotes, `versioncontrolops` remotes/`Push`/`Fetch`); wire the CLI. Sync of a versioned knowledge graph = `dolt push/pull`. |
-| **Generate** | `asdf generate`: DB → git-ignored **Markdown + HTML** (the canonical-derived read artifacts) | **requested. ASDF-original** — beads has no generate; it exports JSONL. This is core to ASDF's "generated, never edited" principle. |
-| **Cross-references** | inline **entity links** inside Markdown / description text fields — stored as canonical refs (e.g. `[[REQ:ATT-FR-012]]`), rendered by `generate` as **Obsidian wikilinks + block references** (`[[path#^fr-key|label]]`); **HTML `<a>` reserved for the future HTML path** | **in-progress (Markdown). ASDF-original.** Design ratified in [decisions.md](entities/decisions.md); the queryable form is [`EntityRef`](entities/requirements.md#entityref). Targets any keyed entity (Domain/Spec/Requirement/Milestone/Entity; Glossary deferred). Dangling ref → blocks an interactive write / warns on import / a `check` finding later. **Distinct from `Edge`**: `Edge` is the hand-authored structured graph; `EntityRef` holds all prose-derived references — **agents should prefer edges where a real relationship exists**; inline links are prose-readability sugar. **Deferred:** HTML render (needs an HTML generate path) and `[[TERM:…]]` (needs the glossary). |
-| **Glossary / terms** | a `GlossaryTerm` store (slug, term, definition, aliases, optional domain scope) — shared vocabulary so humans & agents define a concept **once** and reference it everywhere | **in-progress. ASDF-original.** Data model landed ([glossary.md](entities/glossary.md): `GlossaryTerm` + `GlossaryAlias`). Different from the business **Entity** layer (that models domain *documents*; a term is project *vocabulary*). A first-class `[[TERM:slug]]` **link target** (see Cross-references) and a generated artifact (`glossary.md`). Authored via `asdf term …`. |
+| **Generate** | `asdf generate --format md\|json\|html`: DB → git-ignored read artifacts | **DONE (md/json/html). ASDF-original** — beads has no generate; it exports JSONL. Core to the "generated, never edited" principle. **Renderer architecture:** `Load` assembles the graph once into a format-agnostic view `Model` ([model.go](../internal/generate/model.go)); a `Renderer` turns it into output files. Two families: **document** (Markdown — Obsidian wikilinks+block-refs; HTML — same pipeline transformed to relative `.html` links via goldmark) and **data** (JSON — per-doc records + an `index.json` manifest, prose keeps raw `[[TYPE:key]]` tokens). Markdown is byte-identical across the refactor; adding a format = one `Renderer`. **Remaining:** HTML **styling/polish** (a CSS theme + nicer layout — output is currently unstyled, semantic HTML); **incremental regeneration** (next row). |
+| **Incremental generation** | auto-regenerate only the **affected** output docs on **every DB change** (CLI *or* MCP), in the user-configured subset of formats; **performance-critical** | **planned (requested).** Hook at `app.Mutate` (the one write path for CLI + MCP), after a successful commit. **Dirty-set** = the owning doc(s) of changed entities ∪ affected index/domain/glossary pages ∪ docs that inline-link a **deleted/renamed** entity — computed from the `entity_ref`/`impact` graph **or** the Dolt commit diff (the diff survives `DeleteNodeRefs` removing the ref rows, so it's the safer source for deletes). **Perf:** per-doc *targeted* loaders (never full `Load`), cache `ListRefTargets` (invalidate on keyed-entity add/remove/rename), **hash-compare before writing** (skip no-op writes), batch the dirty-set across the whole `Mutate` body. **Config:** `enabled` + `formats: […]` + per-format `out`; off by default. **Correctness gate:** incremental output must equal a full `generate` (keep full generate as source of truth + an incremental==full check). |
+| **Cross-references** | inline **entity links** inside Markdown / description text fields — stored as canonical refs (e.g. `[[REQ:ATT-FR-012]]`), rendered by `generate` as **Obsidian wikilinks + block references** (`[[path#^fr-key|label]]`) for Markdown and as **relative `<a href>` links** for HTML (the data formats leave the raw `[[TYPE:key]]` tokens) | **DONE (md/html/json). ASDF-original.** Design ratified in [decisions.md](entities/decisions.md); the queryable form is [`EntityRef`](entities/requirements.md#entityref). Targets any keyed entity (Domain/Spec/Requirement/Milestone/Entity; Glossary deferred). Dangling ref → blocks an interactive write / warns on import / a `check` finding later. **Distinct from `Edge`**: `Edge` is the hand-authored structured graph; `EntityRef` holds all prose-derived references — **agents should prefer edges where a real relationship exists**; inline links are prose-readability sugar. Both formerly-deferred pieces are now **done**: the **HTML render** (relative `<a href>` via the HTML renderer) and **`[[TERM:…]]`** resolution (the resolver indexes glossary terms; `generate` emits the glossary page as the link target). |
+| **Glossary / terms** | a `GlossaryTerm` store (slug, term, definition, aliases, optional domain scope) — shared vocabulary so humans & agents define a concept **once** and reference it everywhere | **DONE. ASDF-original.** Data model ([glossary.md](entities/glossary.md): `GlossaryTerm` + `GlossaryAlias`); `asdf term add/ls/show/edit/delete` (with aliases); `[[TERM:slug]]` resolves (slug + aliases) and `generate` emits the `glossary.md` page (block-anchor per term) as the link target. Distinct from the business **Entity** layer (domain *documents*) — a term is project *vocabulary*. **Note:** the tutor corpus seeds no terms, so the page is empty until terms are authored. |
 | **Batch add** | `asdf <entity> add --file <f>` and/or `asdf batch <f>` — bulk-create entities from a **JSON/CSV** file in ASDF's own shape, in **one changeset/commit** | adapt beads' `bd create --file`/`--graph`; rides the `Mutate` wrapper so the whole batch is one transaction + one Dolt commit. |
 | **Generic import** | `asdf import --format json\|csv <f>` — ingest **arbitrary external** JSON/CSV and map columns/fields into the schema via a mapping spec | **TODO.** The staging core (`internal/importer`: `Graph`/`Report`/idempotent `Apply`) exists from the tutor work; still needed is the external-shape → field-mapping front end (distinct from batch add). Routes through the contract. |
 | **Source adapters** | `asdf import <source>` — pluggable per-source adapters on the staging core | **`tutor` done** (see Done — read-only report + `--apply`, Domain→Entity). Remaining: `Test*` needs a Qase export (absent in the corpus); `EntityAttribute`/`EntityRelationship` need a non-prose source or an enrichment pass. Future adapters reuse `importer.Apply`. |
@@ -115,7 +119,7 @@ Cross-cutting beads features (not issue-domain), and ASDF's status:
 | `metrics`/telemetry | likely **skip / opt-in** |
 | `stats`, `count`, `info`, `history`, `where` | **roadmap (Query/inspect)** |
 
-**Generate (Markdown/HTML), cross-references, and the glossary are ASDF-originals beads has none
+**Generate (Markdown/JSON/HTML), cross-references, and the glossary are ASDF-originals beads has none
 of** — beads is an issue tracker that snapshots to JSONL; ASDF is a spec/knowledge store whose
 human/agent views are generated from the canonical DB, woven together by inline entity links and a
 shared glossary.
@@ -171,12 +175,12 @@ Dolt (`init` → `add` → commit → changeset round-trip). Codify that:
   FR-number convergence is the documented merge-renumber policy (identifiers.md).
 - **Cross-reference syntax — RESOLVED** ([decisions.md](entities/decisions.md)): token form is
   `[[TYPE:key]]` (optional `|display`); the Markdown render is an Obsidian wikilink with a `^block`
-  reference anchor now, and an HTML `<a href>` once an HTML generate path exists; the **edge-vs-inline-link** policy
+  reference anchor for Markdown, and a relative HTML `<a href>` for the HTML renderer; the **edge-vs-inline-link** policy
   is settled — prose-derived references go to [`EntityRef`](entities/requirements.md#entityref), `Edge`
-  is hand-authored/structured. The data model (`EntityRef` + enums + identifiers) is landed; implementation
-  is in-progress (see the Cross-references core-feature row).
+  is hand-authored/structured. Data model + implementation **done** (canonicalize-on-write through the
+  shared ingestion layer, md/html/json render — see the Cross-references core-feature row).
 - **Glossary schema — RESOLVED** ([glossary.md](entities/glossary.md), [decisions.md](entities/decisions.md)):
   `GlossaryTerm`(slug, term, definition, optional `domain_id`, status) + `GlossaryAlias`(`UNIQUE(alias)`); the
-  `[[TERM:slug]]` link key is the slug, aliases resolve too. Data model landed; implementation in-progress
-  (see the Glossary core-feature row).
-- **`go mod tidy`** upkeep as imports change (currently 11 direct deps).
+  `[[TERM:slug]]` link key is the slug, aliases resolve too. Data model + implementation **done** (see the
+  Glossary core-feature row).
+- **`go mod tidy`** upkeep as imports change (currently 12 direct deps — `goldmark` added for the HTML renderer).

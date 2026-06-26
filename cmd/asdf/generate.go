@@ -8,14 +8,18 @@ import (
 	"github.com/endermalkoc/asdf/internal/generate"
 )
 
-var generateOut string
+var (
+	generateOut    string
+	generateFormat string
+)
 
 var generateCmd = &cobra.Command{
 	Use:   "generate",
-	Short: "Generate Markdown from the database (git-ignored, read-only build artifacts)",
-	Long: "Reconstruct Markdown from the canonical Dolt database: one file per spec at its\n" +
-		"source-relative path, plus the domain and entity index pages. Output is a build\n" +
-		"artifact — never hand-edit it; change the DB and regenerate. Reads only.",
+	Short: "Generate read artifacts from the database (Markdown/JSON/HTML; git-ignored)",
+	Long: "Reconstruct read artifacts from the canonical Dolt database, one file per spec/entity\n" +
+		"at its source-relative path plus index pages. --format selects the renderer: markdown\n" +
+		"(Obsidian, default), json (structured records + an index.json manifest), or html.\n" +
+		"Output is a build artifact — never hand-edit it; change the DB and regenerate. Reads only.",
 	Args: cobra.NoArgs,
 	RunE: func(cmd *cobra.Command, args []string) error {
 		ctx := cmd.Context()
@@ -24,7 +28,7 @@ var generateCmd = &cobra.Command{
 			return err
 		}
 		defer ws.Close()
-		st, err := generate.Generate(ctx, ws.DB(), generateOut)
+		st, err := generate.Generate(ctx, ws.DB(), generateOut, generateFormat)
 		if err != nil {
 			return err
 		}
@@ -32,14 +36,16 @@ var generateCmd = &cobra.Command{
 			emit(st, "")
 			return nil
 		}
-		fmt.Printf("generated %d files into %s  (specs %d, entity docs %d, indexes %d, glossary %d)\n",
-			st.Total(), st.OutDir, st.Specs, st.Entities, st.Indexes, st.Glossary)
+		fmt.Printf("generated %d %s files into %s  (specs %d, entity docs %d, indexes %d, glossary %d)\n",
+			st.Total(), st.Format, st.OutDir, st.Specs, st.Entities, st.Indexes, st.Glossary)
 		return nil
 	},
 }
 
 func init() {
 	generateCmd.Flags().StringVar(&generateOut, "out", ".asdf/generated",
-		"output directory for generated Markdown")
+		"output directory for generated artifacts")
+	generateCmd.Flags().StringVar(&generateFormat, "format", "md",
+		"output format: md | json | html")
 	rootCmd.AddCommand(generateCmd)
 }

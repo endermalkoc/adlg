@@ -172,8 +172,9 @@ _None — all resolved (see below)._
   - **Render is per-format**: the Markdown generator rewrites each token to an **Obsidian wikilink**
     `[[vault-path#^anchor|label]]` (vault-relative path, extension dropped; same-file → `[[#^anchor|label]]`).
     Anchors are **Obsidian block references** (`^fr-key`) emitted at the end of each FR list item (and each
-    glossary term), so `[[REQ:…]]` resolves to the FR inside its spec. **HTML `<a href>`/`<a id>` links are
-    reserved for the future HTML generate path** — the Markdown output carries no HTML. A target with no
+    glossary term), so `[[REQ:…]]` resolves to the FR inside its spec. The **HTML renderer** reuses the same
+    Markdown pipeline, transforming wikilinks → relative `<a href>` and `^block` anchors → `<a id>` targets
+    (goldmark); the **JSON serializer** leaves the raw `[[TYPE:key]]` tokens (data view). A target with no
     generated page (e.g. a milestone) renders label-only but still records the `entity_ref`. The importer
     **converts** the corpus's `[label](./other.md)` cross-spec links to canonical tokens so they round-trip.
 - **Glossary is shared project vocabulary, separate from the Entity layer** (the
