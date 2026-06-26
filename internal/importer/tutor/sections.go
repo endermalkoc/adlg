@@ -7,10 +7,12 @@ import (
 	"github.com/endermalkoc/asdf/internal/importer"
 )
 
-// This file splits a spec/entity Markdown body into its document sections and
-// routes them: recurring template sections → typed fields, everything else →
-// the generic DocSection catch-all. Together with the FR/story parsers this makes
-// a regenerate information-complete.
+// This file splits a spec/entity Markdown body into its document sections and routes
+// each to a curated section-type key (overview, purpose, …). Headings outside the
+// curated vocabulary fold into the `notes` key (concatenated, each prefixed with its
+// original `### heading` so nothing is lost). The FR/story parsers reconstruct the
+// structural blocks; together a regenerate stays information-complete — conformed to
+// the curated vocabulary (migration 0013).
 
 var (
 	h1Re          = regexp.MustCompile(`^#\s+(.+?)\s*$`)
@@ -44,10 +46,10 @@ func normHeading(h string) string {
 }
 
 type rawSection struct {
-	ordinal int
-	level   int
-	heading string
-	body    string
+	position int
+	level    int
+	heading  string
+	body     string
 }
 
 // splitDoc splits a body (after frontmatter) into the H1, the preamble (between
@@ -75,7 +77,7 @@ func splitDoc(body string) (h1, preamble string, sections []rawSection) {
 	}
 	preamble = strings.TrimSpace(strings.Join(pre, "\n"))
 
-	ord := 0
+	pos := 0
 	for i < len(lines) {
 		if !strings.HasPrefix(lines[i], "## ") {
 			i++
@@ -88,8 +90,8 @@ func splitDoc(body string) (h1, preamble string, sections []rawSection) {
 			b = append(b, lines[i])
 			i++
 		}
-		ord++
-		sections = append(sections, rawSection{ordinal: ord, level: 2, heading: heading, body: strings.TrimSpace(strings.Join(b, "\n"))})
+		pos++
+		sections = append(sections, rawSection{position: pos, level: 2, heading: heading, body: strings.TrimSpace(strings.Join(b, "\n"))})
 	}
 	return h1, preamble, sections
 }
@@ -132,79 +134,122 @@ func parseKeyEntities(body string) []string {
 	return out
 }
 
-// routeSpecSections captures a feature spec's sections into sp.Sections in source
-// order: recognized template sections get a normalized section key (overview,
-// edge_cases, …); User Scenarios / Requirements are reconstructed elsewhere from the
-// FR & story parsers (their Edge Cases / Key Entities subsections are extracted here),
-// and every other section is bespoke (empty key). Ordinals are source order; the
-// generator renders keyed sections at canonical positions and bespoke ones by ordinal.
-// (more_info is appended later by the FR parser — see Parse.)
-func routeSpecSections(sp *importer.Spec, h1, preamble string, sections []rawSection) {
-	sp.Heading = h1
-	push := sectionPusher(&sp.Sections)
-	if strings.TrimSpace(preamble) != "" {
-		push(0, "", preamble, "preamble")
+// specHeadingToKey / entityHeadingToKey map a normalized source heading to a curated
+// section-type key. A heading absent from the map folds into `notes`. Every value here
+// must be a seeded key (req_spec_section_type / ent_entity_section_type); apply skips and
+// reports any key the seed does not know, so drift surfaces instead of corrupting data.
+var specHeadingToKey = map[string]string{
+	"overview":         "overview",
+	"success criteria": "success_criteria",
+	"platform scope":   "scope", // generalized from the corpus
+	"assumptions":      "assumptions",
+	"clarifications":   "open_questions", // generalized from the corpus
+}
+
+var entityHeadingToKey = map[string]string{
+	"purpose":                "purpose",
+	"key concepts":           "key_concepts",
+	"schema reference":       "schema_reference",
+	"relationships":          "relationships",
+	"business rules":         "business_rules",
+	"validations":            "validations",
+	"row-level access rules": "access_control", // generalized from the corpus
+	"notes":                  "notes",
+	"spec references":        "references", // generalized from the corpus
+}
+
+// sectionAcc accumulates an owner's sections, merging any collisions on a curated key
+// (notably `notes`, the fold target) so apply only ever sees one body per key — which is
+// what UNIQUE(owner, section_type_key) demands. Key order is first-seen (source order);
+// the generator re-orders by SectionType.position, so this order only affects the inner
+// order of a merged body.
+type sectionAcc struct {
+	order []string
+	parts map[string][]string
+}
+
+func newSectionAcc() *sectionAcc { return &sectionAcc{parts: map[string][]string{}} }
+
+func (a *sectionAcc) add(key, body string) {
+	body = strings.TrimSpace(body)
+	if body == "" {
+		return
 	}
+	if _, ok := a.parts[key]; !ok {
+		a.order = append(a.order, key)
+	}
+	a.parts[key] = append(a.parts[key], body)
+}
+
+// fold appends content to the `notes` key, keeping the original heading as an inline
+// `### heading` so the folded section stays legible.
+func (a *sectionAcc) fold(heading, body string) {
+	if h := strings.TrimSpace(heading); h != "" {
+		if b := strings.TrimSpace(body); b != "" {
+			a.add("notes", "### "+h+"\n\n"+b)
+			return
+		}
+	}
+	a.add("notes", body)
+}
+
+func (a *sectionAcc) sections() []importer.DocSection {
+	out := make([]importer.DocSection, 0, len(a.order))
+	for _, k := range a.order {
+		out = append(out, importer.DocSection{Key: k, Body: strings.Join(a.parts[k], "\n\n")})
+	}
+	return out
+}
+
+// routeSpecSections captures a feature spec's prose into sp.Sections, each addressed by a
+// curated key. Recognized headings map via specHeadingToKey; User Scenarios / Requirements
+// are reconstructed elsewhere from the FR & story parsers (their Edge Cases / Key Entities
+// subsections are extracted here), and every other heading folds into `notes`.
+// (more_info is appended later by the FR parser — see Parse.)
+func routeSpecSections(sp *importer.Spec, preamble string, sections []rawSection) {
+	acc := newSectionAcc()
+	acc.add("preamble", preamble)
 	for _, s := range sections {
-		switch normHeading(s.heading) {
-		case "overview":
-			push(s.level, s.heading, s.body, "overview")
-		case "success criteria":
-			push(s.level, s.heading, s.body, "success_criteria")
-		case "platform scope":
-			push(s.level, s.heading, s.body, "platform_scope")
-		case "assumptions":
-			push(s.level, s.heading, s.body, "assumptions")
-		case "clarifications":
-			push(s.level, s.heading, s.body, "clarifications")
+		switch norm := normHeading(s.heading); norm {
 		case "key entities":
 			sp.KeyEntities = parseKeyEntities(s.body) // → refs (queryable)
-			// Keep the section verbatim too (bespoke), so a top-level "## Key Entities"
-			// round-trips its prose, not just the refs.
-			push(s.level, s.heading, s.body, "")
+			acc.fold(s.heading, s.body)               // prose still round-trips, in notes
 		case "user scenarios & testing", "user scenarios and testing":
-			if ec := subsection(s.body, "edge cases"); ec != "" {
-				push(3, "Edge Cases", ec, "edge_cases")
-			}
-			// Preserve any intro prose / non-story, non-edge-case subsections (bespoke).
+			acc.add("edge_cases", subsection(s.body, "edge cases"))
 			for _, ex := range sectionExtras(s.body, func(h string) bool {
 				return strings.HasPrefix(h, "user story") || h == "edge cases"
 			}) {
-				push(ex.Level, ex.Heading, ex.Body, "")
+				acc.fold(ex.heading, ex.body)
 			}
 		case "requirements":
 			if ke := subsection(s.body, "key entities"); ke != "" {
 				sp.KeyEntities = parseKeyEntities(ke) // → refs (queryable)
 			}
-			// Preserve intro prose + the Key Entities subsection verbatim (bespoke);
-			// only the FR list is reconstructed from rows.
 			for _, ex := range sectionExtras(s.body, func(h string) bool {
 				return h == "functional requirements"
 			}) {
-				push(ex.Level, ex.Heading, ex.Body, "")
+				acc.fold(ex.heading, ex.body)
 			}
 		default:
-			push(s.level, s.heading, s.body, "")
+			if key, ok := specHeadingToKey[norm]; ok {
+				acc.add(key, s.body)
+			} else {
+				acc.fold(s.heading, s.body)
+			}
 		}
 	}
+	sp.Sections = acc.sections()
 }
 
-// sectionPusher returns a closure that appends a DocSection to *out with the next
-// source-order ordinal. A recognized section passes its key; a bespoke one passes "".
-func sectionPusher(out *[]importer.DocSection) func(level int, heading, body, key string) {
-	return func(level int, heading, body, key string) {
-		*out = append(*out, importer.DocSection{
-			Ordinal: len(*out) + 1, Level: level, Heading: heading, Body: body, Key: key,
-		})
-	}
-}
+// extraSection is a fragment of a structural section that the row/FR parse does not cover.
+type extraSection struct{ heading, body string }
 
-// sectionExtras returns the prose a structural section's typed/row parse does not
-// cover: the intro (before the first `###`, emitted with no heading) and each
-// `###` subsection whose heading `skip` does not match.
-func sectionExtras(body string, skip func(normalized string) bool) []importer.DocSection {
+// sectionExtras returns the prose a structural section's typed/row parse does not cover:
+// the intro (before the first `###`, no heading) and each `###` subsection whose heading
+// `skip` does not match.
+func sectionExtras(body string, skip func(normalized string) bool) []extraSection {
 	lines := strings.Split(body, "\n")
-	var out []importer.DocSection
+	var out []extraSection
 	i := 0
 	var intro []string
 	for ; i < len(lines); i++ {
@@ -214,7 +259,7 @@ func sectionExtras(body string, skip func(normalized string) bool) []importer.Do
 		intro = append(intro, lines[i])
 	}
 	if s := strings.TrimSpace(strings.Join(intro, "\n")); s != "" {
-		out = append(out, importer.DocSection{Level: 0, Heading: "", Body: s})
+		out = append(out, extraSection{body: s})
 	}
 	for i < len(lines) {
 		if !strings.HasPrefix(lines[i], "### ") {
@@ -231,41 +276,24 @@ func sectionExtras(body string, skip func(normalized string) bool) []importer.Do
 		if skip(normHeading(h)) {
 			continue
 		}
-		out = append(out, importer.DocSection{Level: 3, Heading: h, Body: strings.TrimSpace(strings.Join(bs, "\n"))})
+		out = append(out, extraSection{heading: h, body: strings.TrimSpace(strings.Join(bs, "\n"))})
 	}
 	return out
 }
 
-// routeEntitySections captures an entity doc's sections into e.Sections in source
-// order: the preamble (key "preamble") then recognized template sections with a
-// normalized key (purpose, key_concepts, …); bespoke sections carry an empty key.
+// routeEntitySections captures an entity doc's prose into e.Sections: the preamble, then
+// recognized headings via entityHeadingToKey (purpose, key_concepts, …); every other
+// heading folds into `notes` (merged with a genuine `## Notes`, if any).
 func routeEntitySections(e *importer.Entity, preamble string, sections []rawSection) {
-	push := sectionPusher(&e.Sections)
-	if strings.TrimSpace(preamble) != "" {
-		push(0, "", preamble, "preamble")
-	}
+	acc := newSectionAcc()
+	acc.add("preamble", preamble)
 	for _, s := range sections {
-		switch normHeading(s.heading) {
-		case "purpose":
-			push(s.level, s.heading, s.body, "purpose")
-		case "key concepts":
-			push(s.level, s.heading, s.body, "key_concepts")
-		case "schema reference":
-			push(s.level, s.heading, s.body, "schema_reference")
-		case "relationships":
-			push(s.level, s.heading, s.body, "relationships")
-		case "business rules":
-			push(s.level, s.heading, s.body, "business_rules")
-		case "validations":
-			push(s.level, s.heading, s.body, "validations")
-		case "row-level access rules":
-			push(s.level, s.heading, s.body, "row_level_access")
-		case "notes":
-			push(s.level, s.heading, s.body, "notes")
-		case "spec references":
-			push(s.level, s.heading, s.body, "spec_references")
-		default:
-			push(s.level, s.heading, s.body, "")
+		norm := normHeading(s.heading)
+		if key, ok := entityHeadingToKey[norm]; ok {
+			acc.add(key, s.body)
+		} else {
+			acc.fold(s.heading, s.body)
 		}
 	}
+	e.Sections = acc.sections()
 }

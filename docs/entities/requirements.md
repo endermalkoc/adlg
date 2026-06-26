@@ -6,16 +6,16 @@
 and `Edge` (the cross-reference graph).
 
 ## UserStory
-BDD scaffolding inside a spec. **No global ID** — referenced by its per-spec `ordinal`
+BDD scaffolding inside a spec. **No global ID** — referenced by its per-spec `position`
 ("User Story 3"). Carries a priority and the As-a / I-want / So-that persona.
 
 | Attribute | Type | Key | Notes |
 |---|---|---|---|
 | `id` | bigint / uuid | **PK** | Surrogate only; not a citable ID |
 | `spec_id` | FK → Spec | | |
-| `ordinal` | int | | Unique **within spec** (the heading number) |
+| `position` | int | | Unique **within spec** (the document position / heading number) |
 | `title` | varchar | | |
-| `priority` | enum | | `P1`, `P2`, `P3` |
+| `priority` | int | | `0`–`4` level → [`Priority`](#priority) (corpus `P1`–`P4` → `1`–`4`) |
 | `as_a` / `i_want` / `so_that` | text | | Persona narrative (role-style stories) |
 | `narrative` | text | | Prose body for prose-style stories (no As-a line); nullable. Exactly one of this / the As-a triple is set |
 | `why_priority` | text | | The story's "Why this priority" rationale; nullable |
@@ -28,7 +28,7 @@ A Given/When/Then scenario under a user story.
 |---|---|---|---|
 | `id` | bigint / uuid | **PK** | |
 | `user_story_id` | FK → UserStory | | |
-| `ordinal` | int | | Order within story |
+| `position` | int | | Order within story |
 | `given` / `when` / `then` | text | | |
 
 ## Requirement (Functional Requirement)
@@ -51,6 +51,7 @@ self-reference to the base FR. Delivery metadata is inline. See
 | `content_status` | enum | | `draft`, `active`, `obsolete` (the requirement's own lifecycle) |
 | `delivery_status` | varchar | | a `delivery_status.key` (`covered`, `test-pending`, `not-implemented`, `e2e-sufficient`, `shared`, `schema-only`, `deferred`). A **business-key reference** to the [`delivery_status`](#deliverystatus) lookup table — not an FK, so unknown values are tolerated and surfaced, not rejected |
 | `milestone_id` | FK → Milestone | | Nullable |
+| `priority` | int | | `0`–`4` level → [`Priority`](#priority); **nullable** (`NULL` = unprioritized; no corpus source yet) |
 | `owner` | varchar | | e.g. `backend` |
 | `notes` | text | | |
 | `optout_marker` | varchar | | `none`, `visual`, `ops`, `untestable` (**seed**; corpus carries none — forward-looking parser) |
@@ -74,7 +75,7 @@ deliberate exception to the ULID-PK rule — see [identifiers.md](identifiers.md
 
 | Attribute | Type | Key | Notes |
 |---|---|---|---|
-| `key` | varchar | **PK** | the business value, matches `requirement.delivery_status` |
+| `slug` | varchar | **PK** | the business value, matches `requirement.delivery_status`. Named `slug`, not the SQL reserved word `key` (migration 0014) |
 | `label` | varchar | | display name |
 | `description` | text | | what the status means |
 | `sequence` | int | | sort/coverage order |
@@ -82,6 +83,20 @@ deliberate exception to the ULID-PK rule — see [identifiers.md](identifiers.md
 | `requires_e2e_test` | bool | | needs ≥1 `layer = e2e` TestCase (`e2e-sufficient`) |
 | `requires_shared_test` | bool | | needs ≥1 `layer = shared` TestCase (`shared`) |
 | `requires_milestone` | bool | | needs `milestone_id` (`not-implemented`) |
+| `created_at` / `updated_at` | datetime | | |
+
+## Priority
+The **one standard priority taxonomy** (migration `0018`) — a lookup table referenced by
+`UserStory.priority`, `Requirement.priority`, and `TestCase.priority`. Stored as the INT `level`
+(`0` = most urgent), sortable; the label/description are documentation. Like `DeliveryStatus`, it's a
+**soft reference** (no FK) validated in-app. Replaced the old per-entity schemes (`P1`–`P3`,
+`low`/`medium`/`high`).
+
+| Attribute | Type | Key | Notes |
+|---|---|---|---|
+| `level` | int | **PK** | `0` Critical · `1` High · `2` Medium · `3` Low · `4` Backlog |
+| `label` | varchar | | display name |
+| `description` | text | | what the level is for (e.g. `0` = security, data loss, broken builds) |
 | `created_at` / `updated_at` | datetime | | |
 
 ## RequirementGroup
@@ -110,7 +125,7 @@ and `Capability` (many-to-many — a capability can span milestones). Example va
 | Attribute | Type | Key | Notes |
 |---|---|---|---|
 | `id` | bigint / uuid | **PK** | |
-| `abbreviation` | varchar | **UK** | `M0`–`M7`, `Future` |
+| `slug` | varchar | **UK** | `M0`–`M7`, `Future` |
 | `name` | varchar | | |
 | `description` | text | | |
 | `sequence` | int | | `Future` sorts last |
@@ -142,8 +157,9 @@ A **prose-derived** cross-reference: the queryable projection of an inline `[[TY
 (or an importer-discovered mention) found in a text field. The token stays verbatim in the text
 (it is what `generate` rewrites into a link); the `entity_ref` row is its reconciled,
 queryable form — re-derived per owner on every write, so editing prose adds/removes rows. The
-**owner** is the nearest first-class node holding the text (a link in a scenario / `DocSection` /
-`RequirementGroup.note` attributes to its owning `UserStory` / `Spec`). See
+**owner** is the nearest first-class node holding the text (a link in a scenario /
+`SpecSection` / `EntitySection` / `RequirementGroup.note` attributes to its owning `UserStory` /
+`Spec` / `Entity`). See
 [decisions.md](decisions.md) for the token grammar, the dangling-ref policy, and the
 render mapping; **distinct from [`Edge`](#edge)**, which is hand-authored / structured.
 

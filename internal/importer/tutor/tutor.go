@@ -47,7 +47,7 @@ func Parse(docsRoot string) (*importer.Graph, *importer.Report, error) {
 	g.Domains = domains
 	domainSet := map[string]bool{}
 	for _, d := range domains {
-		domainSet[d.Abbrev] = true
+		domainSet[d.Slug] = true
 	}
 
 	// 2. Specs (prefix-registry.md), enriched from frontmatter.
@@ -70,16 +70,14 @@ func Parse(docsRoot string) (*importer.Graph, *importer.Report, error) {
 		if !ok {
 			continue // missing-file finding already recorded in parseSpecs
 		}
-		h1, preamble, secs := splitDoc(body)
-		routeSpecSections(sp, h1, preamble, secs)
+		_, preamble, secs := splitDoc(body)
+		routeSpecSections(sp, preamble, secs)
 		var moreInfo string
 		sp.ReqGroups, moreInfo = collectStatements(sp.Prefix, body, stmtByKey, rep)
-		// FR-area trailing prose (note-only headers, config, tables) → a keyed
-		// doc_section, rendered after the FR list (the generator looks it up by key).
+		// FR-area trailing prose (note-only headers, config, tables) → the `more_info`
+		// section, rendered after the FR list (the generator looks it up by key).
 		if strings.TrimSpace(moreInfo) != "" {
-			sp.Sections = append(sp.Sections, importer.DocSection{
-				Ordinal: len(sp.Sections) + 1, Level: 2, Body: moreInfo, Key: "more_info",
-			})
+			sp.Sections = append(sp.Sections, importer.DocSection{Key: "more_info", Body: moreInfo})
 		}
 		stories, scenarios, ru := parseStories(sp.Prefix, body)
 		roleUnparsed += ru

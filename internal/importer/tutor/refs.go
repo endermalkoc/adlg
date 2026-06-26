@@ -90,15 +90,15 @@ func convertRefs(g *importer.Graph, rep *importer.Report) []importer.EntityRef {
 
 // refConverter holds the business-key indexes a conversion pass resolves against.
 type refConverter struct {
-	specByPath   map[string]*importer.Spec
-	pathByPrefix map[string]string
-	dirByPrefix  map[string]string
-	entityNames  map[string]bool
-	entityByPath map[string]string // entity doc path → entity name
-	frKeys       map[string]bool
-	frKeyByLower map[string]string
-	domainAbbr   map[string]bool
-	milestoneAbb map[string]bool
+	specByPath    map[string]*importer.Spec
+	pathByPrefix  map[string]string
+	dirByPrefix   map[string]string
+	entityNames   map[string]bool
+	entityByPath  map[string]string // entity doc path → entity name
+	frKeys        map[string]bool
+	frKeyByLower  map[string]string
+	domainSlug    map[string]bool
+	milestoneSlug map[string]bool
 
 	out        []importer.EntityRef
 	seen       map[string]bool
@@ -107,16 +107,16 @@ type refConverter struct {
 
 func newRefConverter(g *importer.Graph) *refConverter {
 	c := &refConverter{
-		specByPath:   map[string]*importer.Spec{},
-		pathByPrefix: map[string]string{},
-		dirByPrefix:  map[string]string{},
-		entityNames:  map[string]bool{},
-		entityByPath: map[string]string{},
-		frKeys:       map[string]bool{},
-		frKeyByLower: map[string]string{},
-		domainAbbr:   map[string]bool{},
-		milestoneAbb: map[string]bool{},
-		seen:         map[string]bool{},
+		specByPath:    map[string]*importer.Spec{},
+		pathByPrefix:  map[string]string{},
+		dirByPrefix:   map[string]string{},
+		entityNames:   map[string]bool{},
+		entityByPath:  map[string]string{},
+		frKeys:        map[string]bool{},
+		frKeyByLower:  map[string]string{},
+		domainSlug:    map[string]bool{},
+		milestoneSlug: map[string]bool{},
+		seen:          map[string]bool{},
 	}
 	for i := range g.Specs {
 		sp := &g.Specs[i]
@@ -137,10 +137,10 @@ func newRefConverter(g *importer.Graph) *refConverter {
 		c.frKeyByLower[strings.ToLower(r.FRKey)] = r.FRKey
 	}
 	for _, d := range g.Domains {
-		c.domainAbbr[d.Abbrev] = true
+		c.domainSlug[d.Slug] = true
 	}
 	for _, m := range g.Milestones {
-		c.milestoneAbb[m.Abbrev] = true
+		c.milestoneSlug[m.Slug] = true
 	}
 	return c
 }
@@ -230,7 +230,7 @@ func (c *refConverter) linkToToken(label, url, dir string) (token, targetType, t
 func (c *refConverter) resolveToken(t refs.Token) (string, string, bool) {
 	switch t.Type {
 	case refs.TypeDomain:
-		if c.domainAbbr[t.Key] {
+		if c.domainSlug[t.Key] {
 			return "domain", t.Key, true
 		}
 	case refs.TypeSpec:
@@ -249,7 +249,7 @@ func (c *refConverter) resolveToken(t refs.Token) (string, string, bool) {
 			return "entity", t.Key, true
 		}
 	case refs.TypeMilestone:
-		if c.milestoneAbb[t.Key] {
+		if c.milestoneSlug[t.Key] {
 			return "milestone", t.Key, true
 		}
 	}

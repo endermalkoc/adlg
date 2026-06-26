@@ -89,15 +89,15 @@ func buildReport(g *importer.Graph, stmtByKey map[string]frStatement, rep *impor
 	// Milestone classification. tut-* values are beads issue ids → external_ref
 	// (resolved); backlog is a valid open-string milestone value (resolved).
 	for _, m := range g.Milestones {
-		if knownMilestone(m.Abbrev) {
+		if knownMilestone(m.Slug) {
 			continue
 		}
-		if strings.HasPrefix(m.Abbrev, "tut-") {
+		if strings.HasPrefix(m.Slug, "tut-") {
 			rep.Add(importer.SevInfo, "milestone-is-issue-id",
-				"milestone "+m.Abbrev+" is a beads issue id → external_ref(system=beads), not a milestone", "")
+				"milestone "+m.Slug+" is a beads issue id → external_ref(system=beads), not a milestone", "")
 		} else {
 			rep.Add(importer.SevInfo, "extra-milestone",
-				"milestone value "+m.Abbrev+" is outside M0..M7/Future (valid open-string value, e.g. backlog)", "")
+				"milestone value "+m.Slug+" is outside M0..M7/Future (valid open-string value, e.g. backlog)", "")
 		}
 	}
 
@@ -105,8 +105,8 @@ func buildReport(g *importer.Graph, stmtByKey map[string]frStatement, rep *impor
 	// by Parse, which has the per-block "I want" signal.)
 }
 
-func knownMilestone(abbrev string) bool {
-	switch strings.ToLower(abbrev) {
+func knownMilestone(slug string) bool {
+	switch strings.ToLower(slug) {
 	case "m0", "m1", "m2", "m3", "m4", "m5", "m6", "m7", "future":
 		return true
 	}

@@ -14,7 +14,7 @@ import (
 var TouchedTables = []string{
 	"req_domain", "plan_milestone", "req_spec", "req_requirement", "req_requirement_group",
 	"req_user_story", "req_acceptance_scenario", "req_entity_ref", "pub_external_ref",
-	"ent_entity", "req_doc_section",
+	"ent_entity", "req_spec_section", "ent_entity_section",
 }
 
 // ApplyStats tallies the write, per entity kind.
@@ -36,6 +36,19 @@ func (s *ApplyStats) bump(kind string, inserted bool) {
 	}
 }
 
+// sectionTypeKeySet loads a curated section-type vocabulary into a key set.
+func sectionTypeKeySet(ctx context.Context, x store.Execer, list func(context.Context, store.Execer) ([]store.SectionTypeRow, error)) (map[string]bool, error) {
+	rows, err := list(ctx, x)
+	if err != nil {
+		return nil, err
+	}
+	set := map[string]bool{}
+	for _, t := range rows {
+		set[t.Key] = true
+	}
+	return set, nil
+}
+
 // Apply writes a staged Graph into the database through x (the Mutate wrapper's
 // transaction), in dependency order, idempotently. It applies the import mapping
 // decisions recorded in docs/entities/decisions.md:
@@ -49,30 +62,42 @@ func (s *ApplyStats) bump(kind string, inserted bool) {
 func Apply(ctx context.Context, x store.Execer, g *Graph) (*ApplyStats, error) {
 	st := newStats()
 
+	// Curated section-type vocabularies (seeded by migration). A section whose key the
+	// seed does not know is skipped and counted — so importer↔seed drift surfaces in the
+	// report rather than corrupting data.
+	specSectionKeys, err := sectionTypeKeySet(ctx, x, store.ListSpecSectionTypes)
+	if err != nil {
+		return st, err
+	}
+	entitySectionKeys, err := sectionTypeKeySet(ctx, x, store.ListEntitySectionTypes)
+	if err != nil {
+		return st, err
+	}
+
 	// Domains.
 	domainID := map[string]string{}
 	for _, d := range g.Domains {
 		id, ins, err := store.UpsertDomain(ctx, x, store.Domain{
-			Abbreviation: d.Abbrev, Name: d.Name, Description: d.Description, Kind: d.Kind,
+			Slug: d.Slug, Name: d.Name, Description: d.Description, Kind: d.Kind,
 		})
 		if err != nil {
 			return st, err
 		}
-		domainID[d.Abbrev] = id
+		domainID[d.Slug] = id
 		st.bump("domains", ins)
 	}
 
 	// Milestones (skip beads issue ids — those become external refs below).
 	milestoneID := map[string]string{}
 	for _, m := range g.Milestones {
-		if isIssueID(m.Abbrev) {
+		if isIssueID(m.Slug) {
 			continue
 		}
-		id, ins, err := store.UpsertMilestone(ctx, x, store.Milestone{Abbreviation: m.Abbrev})
+		id, ins, err := store.UpsertMilestone(ctx, x, store.Milestone{Slug: m.Slug})
 		if err != nil {
 			return st, err
 		}
-		milestoneID[m.Abbrev] = id
+		milestoneID[m.Slug] = id
 		st.bump("milestones", ins)
 	}
 
@@ -85,9 +110,12 @@ func Apply(ctx context.Context, x store.Execer, g *Graph) (*ApplyStats, error) {
 			st.Skipped["specs"]++
 			continue
 		}
+		// Stored path is domain-relative (the domain is domain_id; full = domain.slug +
+		// "/" + path, migration 0017). specByPath stays keyed by the full source path,
+		// which is how the importer's cross-references address specs.
 		id, ins, err := store.UpsertSpec(ctx, x, dID, store.Spec{
-			Prefix: sp.Prefix, Slug: slugFromPath(sp.Path), Path: sp.Path,
-			Title: sp.Title, Kind: sp.Kind, Status: sp.Status, Heading: sp.Heading,
+			Prefix: sp.Prefix, Slug: slugFromPath(sp.Path), Path: domainRelPath(sp.Path),
+			Title: sp.Title, Kind: sp.Kind, Status: sp.Status,
 		})
 		if err != nil {
 			return st, err
@@ -97,17 +125,21 @@ func Apply(ctx context.Context, x store.Execer, g *Graph) (*ApplyStats, error) {
 		}
 		specByPath[sp.Path] = id
 		st.bump("specs", ins)
-		// Reconcile the owner's sections (delete-then-insert) so a changed parse
-		// leaves no orphans, then write keyed + bespoke sections.
-		if e := store.DeleteDocSectionsByOwner(ctx, x, "spec", id); e != nil {
+		// Reconcile the spec's sections (delete-then-insert) so a changed parse leaves
+		// no orphans. A key the seed does not know is skipped + counted.
+		if e := store.DeleteSpecSectionsBySpec(ctx, x, id); e != nil {
 			return st, e
 		}
 		for _, ds := range sp.Sections {
-			_, dins, e := store.UpsertDocSection(ctx, x, "spec", id, ds.Ordinal, ds.Level, ds.Heading, ds.Body, ds.Key)
+			if !specSectionKeys[ds.Key] {
+				st.Skipped["sections"]++
+				continue
+			}
+			_, dins, e := store.UpsertSpecSection(ctx, x, id, ds.Key, ds.Body)
 			if e != nil {
 				return st, e
 			}
-			st.bump("doc_sections", dins)
+			st.bump("sections", dins)
 		}
 	}
 
@@ -167,7 +199,7 @@ func Apply(ctx context.Context, x store.Execer, g *Graph) (*ApplyStats, error) {
 	}
 
 	// User stories.
-	storyID := map[string]string{} // prefix#ordinal → id
+	storyID := map[string]string{} // prefix#position → id
 	for _, us := range g.Stories {
 		sid, ok := specID[us.SpecPrefix]
 		if !ok {
@@ -175,26 +207,26 @@ func Apply(ctx context.Context, x store.Execer, g *Graph) (*ApplyStats, error) {
 			continue
 		}
 		id, ins, err := store.UpsertUserStory(ctx, x, store.UserStory{
-			SpecID: sid, Ordinal: us.Ordinal, Title: us.Title, Priority: us.Priority,
+			SpecID: sid, Position: us.Position, Title: us.Title, Priority: us.Priority,
 			AsA: us.AsA, IWant: us.IWant, SoThat: us.SoThat, Narrative: us.Narrative,
 			WhyPriority: us.WhyPriority, IndependentTest: us.IndependentTest,
 		})
 		if err != nil {
 			return st, err
 		}
-		storyID[storyKey(us.SpecPrefix, us.Ordinal)] = id
+		storyID[storyKey(us.SpecPrefix, us.Position)] = id
 		st.bump("user_stories", ins)
 	}
 
 	// Acceptance scenarios.
 	for _, sc := range g.Scenarios {
-		usid, ok := storyID[storyKey(sc.SpecPrefix, sc.StoryOrdinal)]
+		usid, ok := storyID[storyKey(sc.SpecPrefix, sc.StoryPosition)]
 		if !ok {
 			st.Skipped["acceptance_scenarios"]++
 			continue
 		}
 		_, ins, err := store.UpsertScenario(ctx, x, store.Scenario{
-			UserStoryID: usid, Ordinal: sc.Ordinal, Given: sc.Given, When: sc.When, Then: sc.Then,
+			UserStoryID: usid, Position: sc.Position, Given: sc.Given, When: sc.When, Then: sc.Then,
 		})
 		if err != nil {
 			return st, err
@@ -219,21 +251,25 @@ func Apply(ctx context.Context, x store.Execer, g *Graph) (*ApplyStats, error) {
 		}
 		entityID[e.Name] = id
 		st.bump("entities", ins)
-		if e2 := store.DeleteDocSectionsByOwner(ctx, x, "entity", id); e2 != nil {
+		if e2 := store.DeleteEntitySectionsByEntity(ctx, x, id); e2 != nil {
 			return st, e2
 		}
 		for _, ds := range e.Sections {
-			_, dins, err := store.UpsertDocSection(ctx, x, "entity", id, ds.Ordinal, ds.Level, ds.Heading, ds.Body, ds.Key)
+			if !entitySectionKeys[ds.Key] {
+				st.Skipped["sections"]++
+				continue
+			}
+			_, dins, err := store.UpsertEntitySection(ctx, x, id, ds.Key, ds.Body)
 			if err != nil {
 				return st, err
 			}
-			st.bump("doc_sections", dins)
+			st.bump("sections", dins)
 		}
 	}
 
 	// EntityRefs (prose-derived cross-references). Resolve each endpoint by its type:
 	// requirement→reqID(fr_key), spec→specByPath(path), entity→entityID(name),
-	// domain→domainID(abbrev), milestone→milestoneID(abbrev).
+	// domain→domainID(slug), milestone→milestoneID(slug).
 	resolve := func(typ, key string) (string, bool) {
 		switch typ {
 		case "requirement":
@@ -302,6 +338,17 @@ func slugFromPath(path string) string {
 	return strings.TrimSuffix(filepath.Base(path), filepath.Ext(path))
 }
 
-func storyKey(prefix string, ordinal int) string {
-	return prefix + "#" + strconv.Itoa(ordinal)
+// domainRelPath drops the leading segment (the domain directory) from a full docs path,
+// so req_spec.path is stored relative to its domain (full = domain.slug + "/" + this;
+// migration 0017). The top-level directory therefore always equals the domain — a spec
+// filed under a different directory than its domain tag relocates under its domain.
+func domainRelPath(p string) string {
+	if i := strings.IndexByte(p, '/'); i >= 0 {
+		return p[i+1:]
+	}
+	return p
+}
+
+func storyKey(prefix string, position int) string {
+	return prefix + "#" + strconv.Itoa(position)
 }

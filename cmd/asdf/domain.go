@@ -20,7 +20,7 @@ var (
 var domainCmd = &cobra.Command{Use: "domain", Short: "Manage domains"}
 
 var domainAddCmd = &cobra.Command{
-	Use:   "add <abbreviation> <name>",
+	Use:   "add <slug> <name>",
 	Short: "Add a domain",
 	Args:  cobra.ExactArgs(2),
 	RunE: func(cmd *cobra.Command, args []string) error {
@@ -43,7 +43,7 @@ var domainAddCmd = &cobra.Command{
 				return e
 			},
 		}, func(ctx context.Context, w *app.Write) error {
-			res, e := store.AddDomain(ctx, w.Tx, store.Domain{Abbreviation: args[0], Name: args[1], Description: domainDescription, Kind: domainKind})
+			res, e := store.AddDomain(ctx, w.Tx, store.Domain{Slug: args[0], Name: args[1], Description: domainDescription, Kind: domainKind})
 			if e != nil {
 				return e
 			}
@@ -54,7 +54,7 @@ var domainAddCmd = &cobra.Command{
 		if err != nil {
 			return err
 		}
-		emit(d, fmt.Sprintf("added domain %s — %s  (%s, id=%s)", d.Abbreviation, d.Name, d.Kind, d.ID))
+		emit(d, fmt.Sprintf("added domain %s — %s  (%s, id=%s)", d.Slug, d.Name, d.Kind, d.ID))
 		return nil
 	},
 }
@@ -80,7 +80,7 @@ var domainLsCmd = &cobra.Command{
 		}
 		var b strings.Builder
 		for _, d := range domains {
-			fmt.Fprintf(&b, "%-10s %-24s %-14s %s\n", d.Abbreviation, d.Name, d.Kind, d.Status)
+			fmt.Fprintf(&b, "%-10s %-24s %-14s %s\n", d.Slug, d.Name, d.Kind, d.Status)
 		}
 		fmt.Print(b.String())
 		return nil

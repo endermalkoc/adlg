@@ -36,7 +36,7 @@ A defined test. Automated cases carry a `path` and cite FRs (the `frTest` link).
 | `preconditions` | text | | |
 | `layer` | enum | | `unit`, `integration`, `e2e`, `component`, `shared` (the corpus's old `kind`) |
 | `type` | enum | | `functional`, `smoke`, `regression`, `acceptance`, `other` |
-| `priority` | enum | | `low`, `medium`, `high` |
+| `priority` | int | | `0`–`4` level → [`Priority`](requirements.md#priority) (the one standard scheme) |
 | `severity` | enum | | `trivial`, `minor`, `normal`, `major`, `critical`, `blocker` |
 | `automation` | enum | | `manual`, `automated`, `to_be_automated` |
 | `status` | enum | | `draft`, `active`, `deprecated` (lifecycle, **not** run outcome) |
@@ -54,7 +54,7 @@ most; automated cases may leave steps empty).
 |---|---|---|---|
 | `id` | bigint / uuid | **PK** | |
 | `test_case_id` | FK → TestCase | | |
-| `ordinal` | int | | Order within case |
+| `position` | int | | Order within case |
 | `action` | text | | |
 | `expected_result` | text | | |
 

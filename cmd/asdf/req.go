@@ -15,6 +15,7 @@ import (
 var (
 	reqDelivery  string
 	reqMilestone string
+	reqPriority  int
 )
 
 var reqCmd = &cobra.Command{Use: "req", Short: "Manage functional requirements"}
@@ -47,16 +48,28 @@ var reqAddCmd = &cobra.Command{
 					return e
 				}
 				resolved = app.ScanRefs(resolver, "requirement", "", args[1])
+				if cmd.Flags().Changed("priority") {
+					if _, ok, e := store.PriorityByLevel(vctx, ws.DB(), reqPriority); e != nil {
+						return e
+					} else if !ok {
+						return fmt.Errorf("invalid priority %d (see `asdf priority ls`)", reqPriority)
+					}
+				}
 				if !flagForce {
 					return app.DanglingError(resolved.Dangling)
 				}
 				return nil
 			},
 		}, func(ctx context.Context, w *app.Write) error {
+			var prio *int
+			if cmd.Flags().Changed("priority") {
+				prio = &reqPriority
+			}
 			res, e := store.AddRequirement(ctx, w.Tx, args[0], store.Requirement{
 				Statement:      args[1],
 				DeliveryStatus: reqDelivery,
 				MilestoneID:    reqMilestone,
+				Priority:       prio,
 			})
 			if e != nil {
 				return e
@@ -105,9 +118,42 @@ var reqLsCmd = &cobra.Command{
 	},
 }
 
+// priorityCmd exposes the standard 0–4 priority taxonomy.
+var priorityCmd = &cobra.Command{Use: "priority", Short: "The standard 0–4 priority levels"}
+
+var priorityLsCmd = &cobra.Command{
+	Use:   "ls",
+	Short: "List the priority levels (0 = most urgent)",
+	Args:  cobra.NoArgs,
+	RunE: func(cmd *cobra.Command, args []string) error {
+		ctx := cmd.Context()
+		ws, err := connect(ctx)
+		if err != nil {
+			return err
+		}
+		defer ws.Close()
+		ps, err := store.ListPriorities(ctx, ws.DB())
+		if err != nil {
+			return err
+		}
+		if flagJSON {
+			emit(ps, "")
+			return nil
+		}
+		var b strings.Builder
+		for _, p := range ps {
+			fmt.Fprintf(&b, "%d  %-9s %s\n", p.Level, p.Label, p.Description)
+		}
+		fmt.Print(b.String())
+		return nil
+	},
+}
+
 func init() {
 	reqAddCmd.Flags().StringVar(&reqDelivery, "delivery", "", "delivery status (covered|test-pending|not-implemented|...)")
 	reqAddCmd.Flags().StringVar(&reqMilestone, "milestone-id", "", "milestone id")
+	reqAddCmd.Flags().IntVar(&reqPriority, "priority", 0, "priority level 0–4 (0=Critical … 4=Backlog; see `priority ls`)")
 	reqCmd.AddCommand(reqAddCmd, reqLsCmd)
-	rootCmd.AddCommand(reqCmd)
+	priorityCmd.AddCommand(priorityLsCmd)
+	rootCmd.AddCommand(reqCmd, priorityCmd)
 }

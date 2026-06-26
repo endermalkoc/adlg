@@ -60,7 +60,7 @@ var termAddCmd = &cobra.Command{
 		}, func(ctx context.Context, w *app.Write) error {
 			domainID := ""
 			if termDomain != "" {
-				id, ok, e := store.DomainIDByAbbrev(ctx, w.Tx, termDomain)
+				id, ok, e := store.DomainIDBySlug(ctx, w.Tx, termDomain)
 				if e != nil {
 					return e
 				}
@@ -126,7 +126,7 @@ var termLsCmd = &cobra.Command{
 func init() {
 	termAddCmd.Flags().StringVar(&termName, "name", "", "display name (default: the slug)")
 	termAddCmd.Flags().StringSliceVar(&termAliases, "alias", nil, "alternate surface form that also resolves (repeatable)")
-	termAddCmd.Flags().StringVar(&termDomain, "domain", "", "scope to a domain abbreviation (optional)")
+	termAddCmd.Flags().StringVar(&termDomain, "domain", "", "scope to a domain slug (optional)")
 	termAddCmd.Flags().StringVar(&termStatus, "status", "draft", "status (draft|active|deprecated)")
 	termCmd.AddCommand(termAddCmd, termLsCmd)
 	rootCmd.AddCommand(termCmd)

@@ -10,6 +10,7 @@ import (
 
 	"github.com/spf13/cobra"
 
+	"github.com/endermalkoc/asdf/internal/enums"
 	"github.com/endermalkoc/asdf/internal/ids"
 	"github.com/endermalkoc/asdf/internal/storage/versioncontrolops"
 	"github.com/endermalkoc/asdf/internal/store"
@@ -87,7 +88,7 @@ var changesetStartCmd = &cobra.Command{
 		id := ids.New()
 		if _, err := conn.ExecContext(ctx,
 			"INSERT INTO `rev_changeset` (id,title,description,author_id,status,branch,base_commit,created_at,updated_at) VALUES (?,?,?,?,?,?,?,?,?)",
-			id, title, "", authorID, "draft", branch, base, now, now); err != nil {
+			id, title, "", authorID, enums.ChangesetDraft, branch, base, now, now); err != nil {
 			return fmt.Errorf("recording changeset: %w", err)
 		}
 		if err := versioncontrolops.StageAndCommit(ctx, conn, map[string]bool{"rev_changeset": true},
@@ -97,7 +98,7 @@ var changesetStartCmd = &cobra.Command{
 		if err := ws.SetActiveChangeset(branch); err != nil {
 			return err
 		}
-		emit(map[string]any{"branch": branch, "status": "draft", "base_commit": base},
+		emit(map[string]any{"branch": branch, "status": enums.ChangesetDraft, "base_commit": base},
 			fmt.Sprintf("started changeset %s (now active) — edits go here until `asdf changeset submit`/`merge`", branch))
 		return nil
 	},
@@ -182,8 +183,8 @@ var changesetSubmitCmd = &cobra.Command{
 		}
 		now := time.Now().UTC()
 		if _, err := conn.ExecContext(ctx,
-			"UPDATE `rev_changeset` SET status='open', head_commit=?, updated_at=? WHERE branch=?",
-			head, now, branch); err != nil {
+			"UPDATE `rev_changeset` SET status=?, head_commit=?, updated_at=? WHERE branch=?",
+			enums.ChangesetOpen, head, now, branch); err != nil {
 			return err
 		}
 		actor := workspace.ResolveActor(flagActor)
@@ -191,7 +192,7 @@ var changesetSubmitCmd = &cobra.Command{
 			"submit changeset "+branch, actor.CommitAuthorString()); err != nil {
 			return err
 		}
-		emit(map[string]any{"branch": branch, "status": "open", "head_commit": head},
+		emit(map[string]any{"branch": branch, "status": enums.ChangesetOpen, "head_commit": head},
 			fmt.Sprintf("submitted changeset %s for review (head %s)", branch, head[:min(8, len(head))]))
 		return nil
 	},
@@ -238,8 +239,8 @@ var changesetMergeCmd = &cobra.Command{
 		}
 		now := time.Now().UTC()
 		if _, err := conn.ExecContext(ctx,
-			"UPDATE `rev_changeset` SET status='merged', merge_commit=?, updated_at=? WHERE branch=?",
-			mergeCommit, now, branch); err != nil {
+			"UPDATE `rev_changeset` SET status=?, merge_commit=?, updated_at=? WHERE branch=?",
+			enums.ChangesetMerged, mergeCommit, now, branch); err != nil {
 			return err
 		}
 		if err := versioncontrolops.StageAndCommit(ctx, conn, map[string]bool{"rev_changeset": true},
@@ -249,7 +250,7 @@ var changesetMergeCmd = &cobra.Command{
 		if ws.ActiveChangeset() == branch {
 			_ = ws.ClearActiveChangeset()
 		}
-		emit(map[string]any{"branch": branch, "status": "merged", "merge_commit": mergeCommit},
+		emit(map[string]any{"branch": branch, "status": enums.ChangesetMerged, "merge_commit": mergeCommit},
 			fmt.Sprintf("merged changeset %s into main (%s)", branch, mergeCommit[:min(8, len(mergeCommit))]))
 		return nil
 	},
@@ -280,7 +281,7 @@ var changesetAbandonCmd = &cobra.Command{
 			return err
 		}
 		if _, err := conn.ExecContext(ctx,
-			"UPDATE `rev_changeset` SET status='closed', updated_at=? WHERE branch=?", time.Now().UTC(), branch); err != nil {
+			"UPDATE `rev_changeset` SET status=?, updated_at=? WHERE branch=?", enums.ChangesetClosed, time.Now().UTC(), branch); err != nil {
 			return err
 		}
 		if err := versioncontrolops.StageAndCommit(ctx, conn, map[string]bool{"rev_changeset": true},
@@ -293,7 +294,7 @@ var changesetAbandonCmd = &cobra.Command{
 		if ws.ActiveChangeset() == branch {
 			_ = ws.ClearActiveChangeset()
 		}
-		emit(map[string]any{"branch": branch, "status": "closed"},
+		emit(map[string]any{"branch": branch, "status": enums.ChangesetClosed},
 			fmt.Sprintf("abandoned changeset %s (branch deleted)", branch))
 		return nil
 	},

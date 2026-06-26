@@ -6,11 +6,11 @@
 -- GlossaryAlias maps alternate surface forms to one term (globally UNIQUE alias).
 -- See docs/entities/glossary.md and docs/entities/decisions.md.
 CREATE TABLE IF NOT EXISTS `glossary_term` (
-    `id`         VARCHAR(255) NOT NULL,
+    `id`         VARCHAR(36) NOT NULL,
     `slug`       VARCHAR(255) NOT NULL,                  -- [[TERM:slug]] link key, kebab-case
     `term`       VARCHAR(512),                           -- display name
     `definition` TEXT,                                   -- may contain inline [[..]] links
-    `domain_id`  VARCHAR(255),                           -- optional scoping (nullable); null = global
+    `domain_id`  VARCHAR(36),                           -- optional scoping (nullable); null = global
     `status`     VARCHAR(32)  NOT NULL DEFAULT 'draft',  -- values: draft|active|deprecated
     `created_at` DATETIME,
     `updated_at` DATETIME,
@@ -20,8 +20,8 @@ CREATE TABLE IF NOT EXISTS `glossary_term` (
 );
 
 CREATE TABLE IF NOT EXISTS `glossary_alias` (
-    `id`      VARCHAR(255) NOT NULL,
-    `term_id` VARCHAR(255) NOT NULL,
+    `id`      VARCHAR(36) NOT NULL,
+    `term_id` VARCHAR(36) NOT NULL,
     `alias`   VARCHAR(255) NOT NULL,                     -- alternate surface form
     PRIMARY KEY (`id`),
     UNIQUE KEY `uk_glossary_alias` (`alias`),

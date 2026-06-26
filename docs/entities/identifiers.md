@@ -13,8 +13,9 @@ the ULID, so renames/renumbers never cascade.
 *(For brevity the tables and diagram show `id` generically as `bigint / uuid` — read it as a
 ULID everywhere **except** the pure-relationship tables below, where the PK is derived from
 the row's identity, and small **reference/lookup tables** keyed directly by their business value —
-e.g. [`delivery_status`](requirements.md#deliverystatus), whose `key` (`covered`, `e2e-sufficient`, …)
-**is** the PK, like a classic enum table.)*
+e.g. [`delivery_status`](requirements.md#deliverystatus) and the section-type tables, whose `slug`
+(`covered`, `e2e-sufficient`, … / `overview`, `purpose`, …) **is** the PK, like a classic enum table.
+(`slug`, not the SQL reserved word `key`.))*
 
 **Deterministic PK for pure-relationship tables.** A relationship row's identity is entirely
 its foreign keys (plus an enum), and two agents on divergent branches routinely create the
@@ -45,11 +46,11 @@ merges legible.
 
 | Entity | Business `UNIQUE` constraint | Human / cite form (example) |
 |---|---|---|
-| Domain | `UNIQUE(abbreviation)` | `scheduling` |
+| Domain | `UNIQUE(slug)` | `scheduling` |
 | Spec | `UNIQUE(prefix)` (when not null) + `UNIQUE(path)` | `ATT` · `scheduling/events/take-attendance.md` |
 | Requirement | `UNIQUE(spec_id, number, suffix)` | `ATT-FR-012`, `ATT-FR-038a` |
-| UserStory | `UNIQUE(spec_id, ordinal)` | `ATT#US3` (not globally citable) |
-| Milestone | `UNIQUE(abbreviation)` | `M1`, `Future` |
+| UserStory | `UNIQUE(spec_id, position)` | `ATT#US3` (not globally citable) |
+| Milestone | `UNIQUE(slug)` | `M1`, `Future` |
 | Entity | `UNIQUE(name)` | `Student` |
 | EntityAttribute | `UNIQUE(entity_id, name)` | `Student.birthday` |
 | View | `UNIQUE(route)` | `/students/[studentId]?tab=messages` |

@@ -65,19 +65,24 @@ func Generate(ctx context.Context, x store.Execer, outDir string) (*Stats, error
 	}
 	res := refs.NewResolver(toTargets(targets))
 
+	prio, err := loadPriorityLabels(ctx, x)
+	if err != nil {
+		return nil, err
+	}
+
 	for _, sp := range specs {
 		var md string
 		if sp.Kind == "entity" {
 			md, err = renderEntityDoc(ctx, x, sp, entityByPath[sp.Path], res)
 			st.Entities++
 		} else {
-			md, err = renderSpec(ctx, x, sp, res)
+			md, err = renderSpec(ctx, x, sp, res, prio)
 			st.Specs++
 		}
 		if err != nil {
 			return nil, err
 		}
-		if err := writeFile(outDir, sp.Path, md); err != nil {
+		if err := writeFile(outDir, specFullPath(sp), md); err != nil {
 			return nil, err
 		}
 	}
@@ -123,8 +128,8 @@ func renderGlossary(terms []store.GlossaryTermRow, res *refs.Resolver) string {
 		if len(t.Aliases) > 0 {
 			meta += " · aka " + strings.Join(t.Aliases, ", ")
 		}
-		if t.DomainAbbrev != "" {
-			meta += " · domain: " + t.DomainAbbrev
+		if t.DomainSlug != "" {
+			meta += " · domain: " + t.DomainSlug
 		}
 		fmt.Fprintf(&b, "\n_%s_\n", meta)
 		if strings.TrimSpace(t.Definition) != "" {
@@ -137,10 +142,10 @@ func renderGlossary(terms []store.GlossaryTermRow, res *refs.Resolver) string {
 
 // ---- feature spec ----------------------------------------------------------
 
-func renderSpec(ctx context.Context, x store.Execer, sp store.SpecRow, res *refs.Resolver) (string, error) {
+func renderSpec(ctx context.Context, x store.Execer, sp store.SpecRow, res *refs.Resolver, prio map[int]string) (string, error) {
 	var b strings.Builder
-	rin := func(s string) string { out, _ := refs.RenderInline(s, sp.Path, res); return out }
-	ds, err := loadDocSections(ctx, x, "spec", sp.ID)
+	rin := func(s string) string { out, _ := refs.RenderInline(s, specFullPath(sp), res); return out }
+	secs, err := loadSpecSections(ctx, x, sp.ID)
 	if err != nil {
 		return "", err
 	}
@@ -151,24 +156,25 @@ func renderSpec(ctx context.Context, x store.Execer, sp store.SpecRow, res *refs
 		if sp.Title != "" {
 			fmt.Fprintf(&b, "title: %s\n", sp.Title)
 		}
-		fmt.Fprintf(&b, "domain: %s\n", sp.DomainAbbrev)
+		fmt.Fprintf(&b, "domain: %s\n", sp.DomainSlug)
 		fmt.Fprintf(&b, "status: %s\n", titleStatus(sp.Status))
 		b.WriteString("---\n\n")
 	}
 
-	fmt.Fprintf(&b, "# %s\n", heading(sp.Heading, sp.Title, sp.Prefix))
-	writeBlock(&b, "", rin(ds.key("preamble")))
-	writeSection(&b, 2, "Overview", rin(ds.key("overview")))
+	fmt.Fprintf(&b, "# %s\n", heading(sp.Title, sp.Prefix))
 
-	// User Scenarios & Testing: stories (+ rationale) → scenarios → Edge Cases.
+	// Prose before the first structural anchor (preamble, overview).
+	renderBand(&b, secs, rin, 0, posAnchorUserScenarios)
+
+	// Anchor: User Scenarios & Testing — stories (+ rationale) → scenarios → Edge Cases.
 	stories, err := store.ListStoriesBySpec(ctx, x, sp.ID)
 	if err != nil {
 		return "", err
 	}
-	if len(stories) > 0 || ds.key("edge_cases") != "" {
+	if len(stories) > 0 || secs.body("edge_cases") != "" {
 		b.WriteString("\n## User Scenarios & Testing\n")
 		for _, us := range stories {
-			fmt.Fprintf(&b, "\n### User Story %d - %s (Priority: %s)\n", us.Ordinal, us.Title, us.Priority)
+			fmt.Fprintf(&b, "\n### User Story %d - %s (Priority: %s)\n", us.Position, us.Title, priorityText(prio, us.Priority))
 			if us.IWant != "" {
 				narr := "As " + us.AsA + ", I want " + us.IWant
 				if us.SoThat != "" {
@@ -192,20 +198,22 @@ func renderSpec(ctx context.Context, x store.Execer, sp store.SpecRow, res *refs
 				b.WriteString("\n**Acceptance Scenarios**:\n\n")
 				for _, sc := range scns {
 					if sc.When != "" {
-						fmt.Fprintf(&b, "%d. **Given** %s, **When** %s, **Then** %s\n", sc.Ordinal, rin(sc.Given), rin(sc.When), rin(sc.Then))
+						fmt.Fprintf(&b, "%d. **Given** %s, **When** %s, **Then** %s\n", sc.Position, rin(sc.Given), rin(sc.When), rin(sc.Then))
 					} else {
-						fmt.Fprintf(&b, "%d. **Given** %s, **Then** %s\n", sc.Ordinal, rin(sc.Given), rin(sc.Then))
+						fmt.Fprintf(&b, "%d. **Given** %s, **Then** %s\n", sc.Position, rin(sc.Given), rin(sc.Then))
 					}
 				}
 			}
 		}
-		writeSection(&b, 3, "Edge Cases", rin(ds.key("edge_cases")))
+		writeSection(&b, secs.level("edge_cases"), secs.title("edge_cases"), rin(secs.body("edge_cases")))
 	}
 
-	// Requirements: FR list in document order, grouped by RequirementGroup (header
-	// + interspersed note). The Requirements-section intro prose and the Key
-	// Entities subsection round-trip via doc_sections (edges stay the queryable
-	// form of Key Entities).
+	// Prose between the anchors (none today; future-proof).
+	renderBand(&b, secs, rin, posAnchorUserScenarios, posAnchorRequirements)
+
+	// Anchor: Requirements — FR list in document order, grouped by RequirementGroup
+	// (header + interspersed note). The Requirements intro prose and the Key Entities
+	// subsection fold into `notes`; edges stay the queryable form of Key Entities.
 	reqs, err := store.ListReqsBySpecID(ctx, x, sp.ID)
 	if err != nil {
 		return "", err
@@ -243,19 +251,14 @@ func renderSpec(ctx context.Context, x store.Execer, sp store.SpecRow, res *refs
 			}
 		}
 	}
-	// FR-area content that isn't an FR or a real group (note-only headers, config,
-	// tables) — rendered verbatim, unconditionally, at the end of the Requirements
-	// section (emitted even when there are no FRs, matching the source).
-	if strings.TrimSpace(ds.key("more_info")) != "" {
-		fmt.Fprintf(&b, "\n%s\n", rin(strings.TrimRight(ds.key("more_info"), "\n")))
+	// more_info: FR-area trailing prose, headingless, after the FR list (emitted even
+	// when there are no FRs, matching the source).
+	if mi := secs.body("more_info"); strings.TrimSpace(mi) != "" {
+		fmt.Fprintf(&b, "\n%s\n", rin(strings.TrimRight(mi, "\n")))
 	}
 
-	writeSection(&b, 2, "Success Criteria", rin(ds.key("success_criteria")))
-	writeSection(&b, 2, "Platform Scope", rin(ds.key("platform_scope")))
-	writeSection(&b, 2, "Assumptions", rin(ds.key("assumptions")))
-	writeSection(&b, 2, "Clarifications", rin(ds.key("clarifications")))
-
-	writeBespoke(&b, ds.bespoke, sp.Path, res)
+	// Prose after the last anchor (success_criteria, assumptions, scope, open_questions, notes).
+	renderBand(&b, secs, rin, posAnchorRequirements, posEnd)
 	return b.String(), nil
 }
 
@@ -263,39 +266,32 @@ func renderSpec(ctx context.Context, x store.Execer, sp store.SpecRow, res *refs
 
 func renderEntityDoc(ctx context.Context, x store.Execer, sp store.SpecRow, e store.EntityRow, res *refs.Resolver) (string, error) {
 	var b strings.Builder
-	rin := func(s string) string { out, _ := refs.RenderInline(s, sp.Path, res); return out }
-	ds, err := loadDocSections(ctx, x, "entity", e.ID)
+	rin := func(s string) string { out, _ := refs.RenderInline(s, specFullPath(sp), res); return out }
+	secs, err := loadEntitySections(ctx, x, e.ID)
 	if err != nil {
 		return "", err
 	}
-	fmt.Fprintf(&b, "# %s\n", heading(sp.Heading, e.Name, sp.Title))
-	writeBlock(&b, "", rin(ds.key("preamble")))
-	if ds.key("purpose") == "" && e.Description != "" {
+	fmt.Fprintf(&b, "# %s\n", heading(e.Name, sp.Title))
+	// preamble (headingless), then the Description→Purpose fallback (an entity column,
+	// not a section), then the rest of the prose in canonical order.
+	renderBand(&b, secs, rin, 0, posEntityPurpose)
+	if secs.body("purpose") == "" && e.Description != "" {
 		writeBlock(&b, "", rin(e.Description))
 	}
-	writeSection(&b, 2, "Purpose", rin(ds.key("purpose")))
-	writeSection(&b, 2, "Key Concepts", rin(ds.key("key_concepts")))
-	writeSection(&b, 2, "Schema Reference", rin(ds.key("schema_reference")))
-	writeSection(&b, 2, "Relationships", rin(ds.key("relationships")))
-	writeSection(&b, 2, "Business Rules", rin(ds.key("business_rules")))
-	writeSection(&b, 2, "Validations", rin(ds.key("validations")))
-	writeSection(&b, 2, "Row-Level Access Rules", rin(ds.key("row_level_access")))
-	writeSection(&b, 2, "Notes", rin(ds.key("notes")))
-	writeSection(&b, 2, "Spec References", rin(ds.key("spec_references")))
-	writeBespoke(&b, ds.bespoke, sp.Path, res)
+	renderBand(&b, secs, rin, posEntityPurpose, posEnd)
 	return b.String(), nil
 }
 
 // ---- index pages -----------------------------------------------------------
 
 func renderDomainIndex(domains []store.Domain) string {
-	sort.Slice(domains, func(i, j int) bool { return domains[i].Abbreviation < domains[j].Abbreviation })
+	sort.Slice(domains, func(i, j int) bool { return domains[i].Slug < domains[j].Slug })
 	var b strings.Builder
 	b.WriteString("# Feature Specifications\n\n")
 	b.WriteString("Specifications organized by **domain**.\n\n")
 	b.WriteString("## Domains\n\n| Domain | Description |\n|---|---|\n")
 	for _, d := range domains {
-		fmt.Fprintf(&b, "| [%s/](./%s/) | %s |\n", d.Abbreviation, d.Abbreviation, d.Description)
+		fmt.Fprintf(&b, "| [%s/](./%s/) | %s |\n", d.Slug, d.Slug, d.Description)
 	}
 	return b.String()
 }
@@ -344,47 +340,76 @@ func writeBlock(b *strings.Builder, _ string, body string) {
 	fmt.Fprintf(b, "\n%s\n", strings.TrimRight(body, "\n"))
 }
 
-// docSections is an owner's sections split for rendering: recognized sections by
-// their section_key (body only), and the bespoke tail in ordinal order.
-type docSections struct {
-	byKey   map[string]string
-	bespoke []store.DocSectionRow
+// sections is an owner's prose sections, each joined to its curated type — indexed both
+// by key (random access to body/title/level) and in canonical render order.
+type sections struct {
+	byKey   map[string]store.SectionRow
+	ordered []store.SectionRow
 }
 
-// key returns a recognized section's body ("" if absent).
-func (d docSections) key(k string) string { return d.byKey[k] }
-
-// loadDocSections loads an owner's sections once and splits keyed vs bespoke.
-func loadDocSections(ctx context.Context, x store.Execer, ownerType, ownerID string) (docSections, error) {
-	rows, err := store.ListDocSections(ctx, x, ownerType, ownerID)
-	if err != nil {
-		return docSections{}, err
-	}
-	ds := docSections{byKey: map[string]string{}}
+func newSections(rows []store.SectionRow) sections {
+	s := sections{byKey: make(map[string]store.SectionRow, len(rows))}
 	for _, r := range rows {
-		if r.SectionKey != "" {
-			ds.byKey[r.SectionKey] = r.Body
-		} else {
-			ds.bespoke = append(ds.bespoke, r)
-		}
+		s.byKey[r.Key] = r
+		s.ordered = append(s.ordered, r) // store.List* already orders by position
 	}
-	return ds, nil
+	return s
 }
 
-// writeBespoke re-emits the bespoke (non-keyed) sections in ordinal order, with
-// inline cross-references rendered.
-func writeBespoke(b *strings.Builder, bespoke []store.DocSectionRow, ownerDocPath string, res *refs.Resolver) {
-	for _, s := range bespoke {
-		body, _ := refs.RenderInline(s.Body, ownerDocPath, res)
-		if s.Level == 0 || strings.TrimSpace(s.Heading) == "" {
-			writeBlock(b, "", body) // intro prose, no heading
+func (s sections) body(k string) string  { return s.byKey[k].Body }
+func (s sections) title(k string) string { return s.byKey[k].Title }
+
+// level returns a section type's heading depth, defaulting to 2 (level-0 headingless
+// rows are handled separately by renderBand/writeBlock).
+func (s sections) level(k string) int {
+	if l := s.byKey[k].Level; l > 0 {
+		return l
+	}
+	return 2
+}
+
+func loadSpecSections(ctx context.Context, x store.Execer, specID string) (sections, error) {
+	rows, err := store.ListSpecSections(ctx, x, specID)
+	if err != nil {
+		return sections{}, err
+	}
+	return newSections(rows), nil
+}
+
+func loadEntitySections(ctx context.Context, x store.Execer, entityID string) (sections, error) {
+	rows, err := store.ListEntitySections(ctx, x, entityID)
+	if err != nil {
+		return sections{}, err
+	}
+	return newSections(rows), nil
+}
+
+// Canonical-order band boundaries. renderBand renders prose sections by
+// SectionType.position; the two structural blocks are interleaved at these positions and
+// own the block-owned types (edge_cases under User Scenarios, more_info under
+// Requirements), which renderBand skips. The seed's positions must straddle these.
+const (
+	posAnchorUserScenarios = 25
+	posAnchorRequirements  = 35
+	posEntityPurpose       = 10 // the entity Description→Purpose fallback slots just before this
+	posEnd                 = 1 << 30
+)
+
+// blockOwned section types render inside their structural anchor, not the generic sweep.
+var blockOwned = map[string]bool{"edge_cases": true, "more_info": true}
+
+// renderBand emits prose sections whose position is in [lo,hi), in order, skipping
+// block-owned types; a level-0 (headingless) type renders as a bare block.
+func renderBand(b *strings.Builder, secs sections, rin func(string) string, lo, hi int) {
+	for _, s := range secs.ordered {
+		if s.Position < lo || s.Position >= hi || blockOwned[s.Key] {
 			continue
 		}
-		level := s.Level
-		if level < 2 {
-			level = 2
+		if s.Level == 0 {
+			writeBlock(b, "", rin(s.Body))
+		} else {
+			writeSection(b, s.Level, s.Title, rin(s.Body))
 		}
-		writeSection(b, level, s.Heading, body)
 	}
 }
 
@@ -406,6 +431,36 @@ func titleStatus(s string) string {
 }
 
 // writeFile writes content to outDir/relPath, creating parent directories.
+// loadPriorityLabels loads the level→label map for the 0–4 priority taxonomy.
+func loadPriorityLabels(ctx context.Context, x store.Execer) (map[int]string, error) {
+	rows, err := store.ListPriorities(ctx, x)
+	if err != nil {
+		return nil, err
+	}
+	m := make(map[int]string, len(rows))
+	for _, p := range rows {
+		m[p.Level] = p.Label
+	}
+	return m, nil
+}
+
+// priorityText renders a priority level as "level - Label" (just the level if unknown).
+func priorityText(prio map[int]string, level int) string {
+	if l := prio[level]; l != "" {
+		return fmt.Sprintf("%d - %s", level, l)
+	}
+	return fmt.Sprintf("%d", level)
+}
+
+// specFullPath reconstructs a spec's full docs path from its domain-relative path:
+// `<domain-slug>/<path>` (req_spec.path no longer carries the domain — migration 0017).
+func specFullPath(sp store.SpecRow) string {
+	if sp.DomainSlug == "" {
+		return sp.Path
+	}
+	return sp.DomainSlug + "/" + sp.Path
+}
+
 func writeFile(outDir, relPath, content string) error {
 	target := filepath.Join(outDir, filepath.FromSlash(relPath))
 	if err := os.MkdirAll(filepath.Dir(target), 0o755); err != nil {

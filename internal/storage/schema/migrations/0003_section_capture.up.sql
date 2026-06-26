@@ -44,10 +44,12 @@ ALTER TABLE `entity`
 -- doc_section: the generic catch-all for any document section not modeled as a
 -- typed field. owner is POLYMORPHIC (spec|entity) so it is not an FK. Ordinal
 -- preserves the section's original document position.
+-- DROPPED by migration 0013 (replaced by the typed, curated *_section/*_section_type
+-- tables); the comments below are historical.
 CREATE TABLE IF NOT EXISTS `doc_section` (
-    `id`         VARCHAR(255) NOT NULL,
+    `id`         VARCHAR(36) NOT NULL,
     `owner_type` VARCHAR(32)  NOT NULL,   -- values: spec|entity
-    `owner_id`   VARCHAR(255) NOT NULL,
+    `owner_id`   VARCHAR(36) NOT NULL,
     `ordinal`    INT          NOT NULL,   -- original position in the source doc
     `level`      INT          NOT NULL,   -- heading depth: 2 = ##, 3 = ###
     `heading`    TEXT,

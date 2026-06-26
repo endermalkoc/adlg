@@ -6,7 +6,7 @@
 > `Privilege` (`(resource, scope, action)` triple) + `AccessRule` (entity↔privilege binding) pair.
 > That baked one corpus's CASL-style authorization paradigm into the core schema and was never
 > consumed (nothing read it; `Privilege` was write-only), so migration `0012` removed both. An
-> entity's access rules live as **prose** in its `row_level_access` [`DocSection`](structure.md#docsection);
+> entity's access rules live as **prose** in its `access_control` [`EntitySection`](#entitysection);
 > a generic, consumer-driven authorization concept can return later (see [ROADMAP](../ROADMAP.md)).
 
 > These are **authored business-domain documents**, not a projection of the technical
@@ -30,14 +30,44 @@ Usually has a documenting spec (`kind = entity`) that carries the prose.
 | `description` | text | | Short domain definition (from the entity index); nullable. **Not a doc section** |
 | `status` | enum | | `draft`, `active`, `deprecated` |
 
-> Entity docs are rigidly templated; their recurring sections (`purpose`, `key_concepts`,
-> `schema_reference`, `relationships`, `business_rules`, `validations`, `row_level_access`, `notes`,
-> `spec_references`) are captured as [`DocSection`](structure.md#docsection) rows keyed by `section_key`
-> (migration `0010` replaced the former per-section typed columns), with bespoke sections as
-> `section_key = NULL` — a regenerate is then information-complete. `EntityAttribute` /
-> `EntityRelationship` remain the **finer structured extraction** of that same prose —
-> populated when a command parses it, not a duplicate source of truth. (`row_level_access` has
-> no structured counterpart — it stays prose-only; see the note at the top of this page.)
+> Entity docs are templated; their **prose sections** are captured as [`EntitySection`](#entitysection)
+> rows, each pointing at a curated [`EntitySectionType`](#entitysectiontype) — the entity-layer mirror
+> of [`SpecSection`](structure.md#specsection). There are **no free-form sections**: headings outside the
+> curated vocabulary **fold into the `notes` type** on import. `EntityAttribute` / `EntityRelationship`
+> remain the **finer structured extraction** of that same prose — populated when a command parses it, not
+> a duplicate source of truth. (`access_control` has no structured counterpart — it stays prose-only; see
+> the note at the top of this page.)
+
+## EntitySectionType
+The **curated vocabulary** of entity prose sections — the entity-layer mirror of
+[`SpecSectionType`](structure.md#specsectiontype). A built-in seed ships with migration `0013`; new
+types may be added later at a deliberate cost.
+
+| Attribute | Type | Key | Notes |
+|---|---|---|---|
+| `slug` | varchar | **PK** | Stable id the CLI/importer selects by (`purpose`, `key_concepts`, …). Named `slug`, not the SQL reserved word `key` |
+| `title` | text | | The section's title, rendered as the `##` heading; `""`/nullable = headingless intro (e.g. `preamble`) |
+| `level` | int | | Heading depth: `2` = `##`, `0` = headingless |
+| `position` | int | | Canonical render order — **uniform across every doc** |
+| `description` | text | | Guidance shown when picking a type; nullable |
+| `origin` | enum | | `builtin` (seed) or `authored` (added later) |
+
+> Seed keys: `preamble`, `purpose`, `key_concepts`, `schema_reference`, `relationships`,
+> `business_rules`, `validations`, `access_control`, `notes`, `references`.
+
+## EntitySection
+One prose section of an entity, addressed by its curated type. Title, depth, and order all come from
+the [`EntitySectionType`](#entitysectiontype); the instance carries only the body. Entity docs have **no
+structural anchors**, so every section renders in a simple `position`-ordered sweep.
+
+| Attribute | Type | Key | Notes |
+|---|---|---|---|
+| `id` | bigint / uuid | **PK** | |
+| `entity_id` | FK → Entity | | `ON DELETE CASCADE` |
+| `section_type_slug` | FK → EntitySectionType | | The curated type — **`NOT NULL`** |
+| `body` | text | | The section's Markdown body, verbatim |
+
+> `UNIQUE(entity_id, section_type_slug)` — at most one section of each type per entity.
 
 ## EntityAttribute
 A documented **domain property** of an entity — its business meaning, not a typed DB

@@ -97,7 +97,7 @@ func firstLinkText(s string) string {
 // ---- domains (specs/index.md) ----------------------------------------------
 
 // parseDomains reads the two domain tables in specs/index.md. The directory
-// name is the abbreviation; kind is inferred from well-known reference dirs.
+// name is the slug; kind is inferred from well-known reference dirs.
 func parseDomains(indexPath string) ([]importer.Domain, error) {
 	b, err := os.ReadFile(indexPath)
 	if err != nil {
@@ -115,23 +115,23 @@ func parseDomains(indexPath string) ([]importer.Domain, error) {
 		if head == "domain" || head == "directory" {
 			continue // header row
 		}
-		abbrev := strings.TrimSuffix(strings.TrimSpace(firstLinkText(cells[0])), "/")
-		if abbrev == "" || strings.Contains(abbrev, " ") || seen[abbrev] {
+		slug := strings.TrimSuffix(strings.TrimSpace(firstLinkText(cells[0])), "/")
+		if slug == "" || strings.Contains(slug, " ") || seen[slug] {
 			continue
 		}
-		seen[abbrev] = true
+		seen[slug] = true
 		out = append(out, importer.Domain{
-			Abbrev:      abbrev,
-			Name:        titleCase(abbrev),
-			Kind:        domainKind(abbrev),
+			Slug:        slug,
+			Name:        titleCase(slug),
+			Kind:        domainKind(slug),
 			Description: cells[1],
 		})
 	}
 	return out, nil
 }
 
-func domainKind(abbrev string) string {
-	switch abbrev {
+func domainKind(slug string) string {
+	switch slug {
 	case "shared":
 		return "shared"
 	case "entities":
@@ -187,7 +187,7 @@ func parseSpecs(specsDir string, rep *importer.Report, domainSet map[string]bool
 
 		sp := importer.Spec{
 			Prefix: prefix,
-			Path:   path,
+			Path:   path, // full source path (used for disk reads + dedup); apply stores it domain-relative
 			Domain: domain,
 			Kind:   specKind(path),
 		}

@@ -11,6 +11,7 @@ import (
 	"fmt"
 	"time"
 
+	"github.com/endermalkoc/asdf/internal/enums"
 	"github.com/endermalkoc/asdf/internal/ids"
 )
 
@@ -26,12 +27,12 @@ type Execer interface {
 // ---- entities (the slice) -------------------------------------------------
 
 type Domain struct {
-	ID           string `json:"id"`
-	Abbreviation string `json:"abbreviation"`
-	Name         string `json:"name"`
-	Description  string `json:"description,omitempty"`
-	Kind         string `json:"kind"`
-	Status       string `json:"status"`
+	ID          string `json:"id"`
+	Slug        string `json:"slug"`
+	Name        string `json:"name"`
+	Description string `json:"description,omitempty"`
+	Kind        string `json:"kind"`
+	Status      string `json:"status"`
 }
 
 type Spec struct {
@@ -43,9 +44,8 @@ type Spec struct {
 	Title    string `json:"title,omitempty"`
 	Kind     string `json:"kind"`
 	Status   string `json:"status"`
-	// Heading is the H1 identity line (kept on spec); all prose sections now live in
-	// doc_section keyed by section_key (migration 0010).
-	Heading string `json:"heading,omitempty"`
+	// Title is the single spec label; the H1 renders as `# {title}`. All prose
+	// sections live in req_spec_section, each typed by req_spec_section_type (0013).
 }
 
 type Requirement struct {
@@ -64,6 +64,7 @@ type Requirement struct {
 	OptoutReason   string `json:"optout_reason,omitempty"`
 	GroupID        string `json:"group_id,omitempty"`
 	Position       int    `json:"position,omitempty"`
+	Priority       *int   `json:"priority,omitempty"` // 0–4 (req_priority); nil = unprioritized
 }
 
 func nullIfEmpty(s string) any {
@@ -71,6 +72,14 @@ func nullIfEmpty(s string) any {
 		return nil
 	}
 	return s
+}
+
+// nullIfNil maps a nil *int to SQL NULL, else its value (for nullable int columns).
+func nullIfNil(p *int) any {
+	if p == nil {
+		return nil
+	}
+	return *p
 }
 
 // ---- Domain ---------------------------------------------------------------
@@ -86,17 +95,17 @@ func AddDomain(ctx context.Context, x Execer, d Domain) (Domain, error) {
 	}
 	d.ID = ids.New()
 	_, err := x.ExecContext(ctx,
-		"INSERT INTO `req_domain` (id,abbreviation,name,description,kind,status) VALUES (?,?,?,?,?,?)",
-		d.ID, d.Abbreviation, d.Name, nullIfEmpty(d.Description), d.Kind, d.Status)
+		"INSERT INTO `req_domain` (id,slug,name,description,kind,status) VALUES (?,?,?,?,?,?)",
+		d.ID, d.Slug, d.Name, nullIfEmpty(d.Description), d.Kind, d.Status)
 	if err != nil {
-		return Domain{}, fmt.Errorf("add domain %q: %w", d.Abbreviation, err)
+		return Domain{}, fmt.Errorf("add domain %q: %w", d.Slug, err)
 	}
 	return d, nil
 }
 
 func ListDomains(ctx context.Context, x Execer) ([]Domain, error) {
 	rows, err := x.QueryContext(ctx,
-		"SELECT id,abbreviation,name,COALESCE(description,''),kind,status FROM `req_domain` ORDER BY abbreviation")
+		"SELECT id,slug,name,COALESCE(description,''),kind,status FROM `req_domain` ORDER BY slug")
 	if err != nil {
 		return nil, err
 	}
@@ -104,7 +113,7 @@ func ListDomains(ctx context.Context, x Execer) ([]Domain, error) {
 	var out []Domain
 	for rows.Next() {
 		var d Domain
-		if err := rows.Scan(&d.ID, &d.Abbreviation, &d.Name, &d.Description, &d.Kind, &d.Status); err != nil {
+		if err := rows.Scan(&d.ID, &d.Slug, &d.Name, &d.Description, &d.Kind, &d.Status); err != nil {
 			return nil, err
 		}
 		out = append(out, d)
@@ -112,20 +121,20 @@ func ListDomains(ctx context.Context, x Execer) ([]Domain, error) {
 	return out, rows.Err()
 }
 
-func domainIDByAbbrev(ctx context.Context, x Execer, abbrev string) (string, error) {
+func domainIDBySlug(ctx context.Context, x Execer, slug string) (string, error) {
 	var id string
-	err := x.QueryRowContext(ctx, "SELECT id FROM `req_domain` WHERE abbreviation=?", abbrev).Scan(&id)
+	err := x.QueryRowContext(ctx, "SELECT id FROM `req_domain` WHERE slug=?", slug).Scan(&id)
 	if err == sql.ErrNoRows {
-		return "", fmt.Errorf("no domain with abbreviation %q", abbrev)
+		return "", fmt.Errorf("no domain with slug %q", slug)
 	}
 	return id, err
 }
 
 // ---- Spec -----------------------------------------------------------------
 
-// AddSpec resolves the domain by abbreviation, mints a ULID, and inserts the spec.
-func AddSpec(ctx context.Context, x Execer, domainAbbrev string, sp Spec) (Spec, error) {
-	domID, err := domainIDByAbbrev(ctx, x, domainAbbrev)
+// AddSpec resolves the domain by slug, mints a ULID, and inserts the spec.
+func AddSpec(ctx context.Context, x Execer, domainSlug string, sp Spec) (Spec, error) {
+	domID, err := domainIDBySlug(ctx, x, domainSlug)
 	if err != nil {
 		return Spec{}, err
 	}
@@ -187,8 +196,8 @@ func AddRequirement(ctx context.Context, x Execer, specPrefix string, r Requirem
 	r.ID = ids.New()
 	now := time.Now().UTC()
 	_, err = x.ExecContext(ctx,
-		"INSERT INTO `req_requirement` (id,spec_id,number,suffix,fr_key,statement,content_status,delivery_status,milestone_id,created_at,updated_at) VALUES (?,?,?,?,?,?,?,?,?,?,?)",
-		r.ID, r.SpecID, r.Number, nullIfEmpty(r.Suffix), r.FRKey, r.Statement, r.ContentStatus, nullIfEmpty(r.DeliveryStatus), nullIfEmpty(r.MilestoneID), now, now)
+		"INSERT INTO `req_requirement` (id,spec_id,number,suffix,fr_key,statement,content_status,delivery_status,milestone_id,priority,created_at,updated_at) VALUES (?,?,?,?,?,?,?,?,?,?,?,?)",
+		r.ID, r.SpecID, r.Number, nullIfEmpty(r.Suffix), r.FRKey, r.Statement, r.ContentStatus, nullIfEmpty(r.DeliveryStatus), nullIfEmpty(r.MilestoneID), nullIfNil(r.Priority), now, now)
 	if err != nil {
 		return Requirement{}, fmt.Errorf("add requirement to %q: %w", specPrefix, err)
 	}
@@ -263,7 +272,7 @@ func SeedActor(ctx context.Context, x Execer, handle, name string) (string, erro
 		return "", err
 	}
 	id = ids.New()
-	kind := "human"
+	kind := enums.ActorHuman
 	_, err = x.ExecContext(ctx,
 		"INSERT INTO `rev_actor` (id,kind,name,handle) VALUES (?,?,?,?)",
 		id, kind, name, handle)

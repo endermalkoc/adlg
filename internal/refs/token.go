@@ -5,8 +5,8 @@
 // from the store; the importer resolves against its own staging graph.
 //
 // Token form: `[[TYPE:key]]` with an optional display, `[[REQ:ATT-FR-012|the rule]]`.
-// Types map to existing business keys — DOMAIN(abbreviation), SPEC(prefix or path),
-// REQ(fr_key), ENTITY(name), MILESTONE(abbreviation), TERM(glossary slug or alias).
+// Types map to existing business keys — DOMAIN(slug), SPEC(prefix or path),
+// REQ(fr_key), ENTITY(name), MILESTONE(slug), TERM(glossary slug or alias).
 package refs
 
 import (

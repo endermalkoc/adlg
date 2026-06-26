@@ -19,7 +19,7 @@
 -- ============================================================================
 
 CREATE TABLE IF NOT EXISTS `domain` (
-    `id`           VARCHAR(255) NOT NULL,
+    `id`           VARCHAR(36) NOT NULL,
     `abbreviation` VARCHAR(64)  NOT NULL,
     `name`         VARCHAR(255) NOT NULL,
     `kind`         VARCHAR(32)  NOT NULL,                 -- values: service|shared|infrastructure|entities|analysis
@@ -29,8 +29,8 @@ CREATE TABLE IF NOT EXISTS `domain` (
 );
 
 CREATE TABLE IF NOT EXISTS `spec` (
-    `id`         VARCHAR(255)  NOT NULL,
-    `domain_id`  VARCHAR(255)  NOT NULL,
+    `id`         VARCHAR(36)  NOT NULL,
+    `domain_id`  VARCHAR(36)  NOT NULL,
     `prefix`     VARCHAR(6),                              -- nullable for FR-exempt docs
     `slug`       VARCHAR(255),
     `path`       VARCHAR(1024) NOT NULL,                  -- source of the directory tree
@@ -51,7 +51,7 @@ CREATE TABLE IF NOT EXISTS `spec` (
 -- ============================================================================
 
 CREATE TABLE IF NOT EXISTS `milestone` (
-    `id`           VARCHAR(255) NOT NULL,
+    `id`           VARCHAR(36) NOT NULL,
     `abbreviation` VARCHAR(64)  NOT NULL,                  -- seed values e.g. M0..M7, Future
     `name`         VARCHAR(255),
     `description`  TEXT,
@@ -64,11 +64,11 @@ CREATE TABLE IF NOT EXISTS `milestone` (
 );
 
 CREATE TABLE IF NOT EXISTS `user_story` (
-    `id`       VARCHAR(255) NOT NULL,
-    `spec_id`  VARCHAR(255) NOT NULL,
+    `id`       VARCHAR(36) NOT NULL,
+    `spec_id`  VARCHAR(36) NOT NULL,
     `ordinal`  INT          NOT NULL,                      -- unique within spec (heading number)
     `title`    VARCHAR(512),
-    `priority` VARCHAR(8),                                 -- values: P1|P2|P3
+    `priority` VARCHAR(8),                                 -- legacy P1|P2|P3; migration 0018 converts to INT level (0–4, req_priority)
     `as_a`     TEXT,
     `i_want`   TEXT,
     `so_that`  TEXT,
@@ -79,8 +79,8 @@ CREATE TABLE IF NOT EXISTS `user_story` (
 );
 
 CREATE TABLE IF NOT EXISTS `acceptance_scenario` (
-    `id`            VARCHAR(255) NOT NULL,
-    `user_story_id` VARCHAR(255) NOT NULL,
+    `id`            VARCHAR(36) NOT NULL,
+    `user_story_id` VARCHAR(36) NOT NULL,
     `ordinal`       INT          NOT NULL,                 -- order within story
     `given`         TEXT,
     `when`          TEXT,
@@ -91,16 +91,16 @@ CREATE TABLE IF NOT EXISTS `acceptance_scenario` (
 );
 
 CREATE TABLE IF NOT EXISTS `requirement` (
-    `id`              VARCHAR(255) NOT NULL,
-    `spec_id`         VARCHAR(255) NOT NULL,               -- owns the numbering namespace
+    `id`              VARCHAR(36) NOT NULL,
+    `spec_id`         VARCHAR(36) NOT NULL,               -- owns the numbering namespace
     `number`          INT          NOT NULL,               -- sequential within spec
     `suffix`          CHAR(1),                             -- optional sub-letter (a,b,...)
-    `parent_id`       VARCHAR(255),                        -- set on sub-requirements
+    `parent_id`       VARCHAR(36),                        -- set on sub-requirements
     `fr_key`          VARCHAR(64),                         -- derived citation form (e.g. ATT-FR-012); app-maintained, see note below
     `statement`       TEXT,
     `content_status`  VARCHAR(32)  NOT NULL DEFAULT 'draft', -- values: draft|active|obsolete
     `delivery_status` VARCHAR(32),                         -- values: covered|test-pending|not-implemented|e2e-sufficient|shared|schema-only|deferred
-    `milestone_id`    VARCHAR(255),
+    `milestone_id`    VARCHAR(36),
     `owner`           VARCHAR(255),
     `notes`           TEXT,
     `optout_marker`   VARCHAR(32)  NOT NULL DEFAULT 'none', -- values: none|visual|ops|untestable
@@ -128,8 +128,8 @@ CREATE TABLE IF NOT EXISTS `requirement` (
 -- ============================================================================
 
 CREATE TABLE IF NOT EXISTS `test_suite` (
-    `id`          VARCHAR(255) NOT NULL,
-    `parent_id`   VARCHAR(255),                            -- self-ref; null at root
+    `id`          VARCHAR(36) NOT NULL,
+    `parent_id`   VARCHAR(36),                            -- self-ref; null at root
     `name`        VARCHAR(255),
     `description` TEXT,
     `position`    INT,
@@ -139,14 +139,14 @@ CREATE TABLE IF NOT EXISTS `test_suite` (
 );
 
 CREATE TABLE IF NOT EXISTS `test_case` (
-    `id`            VARCHAR(255) NOT NULL,
-    `suite_id`      VARCHAR(255) NOT NULL,
+    `id`            VARCHAR(36) NOT NULL,
+    `suite_id`      VARCHAR(36) NOT NULL,
     `title`         VARCHAR(512),
     `description`   TEXT,
     `preconditions` TEXT,
     `layer`         VARCHAR(32),                           -- values: unit|integration|e2e|component|shared
     `type`          VARCHAR(32),                           -- values: functional|smoke|regression|acceptance|other
-    `priority`      VARCHAR(16),                           -- values: low|medium|high
+    `priority`      VARCHAR(16),                           -- legacy low|medium|high; migration 0018 converts to INT level (0–4, req_priority)
     `severity`      VARCHAR(16),                           -- values: trivial|minor|normal|major|critical|blocker
     `automation`    VARCHAR(32),                           -- values: manual|automated|to_be_automated
     `status`        VARCHAR(32)  NOT NULL DEFAULT 'draft', -- values: draft|active|deprecated (lifecycle, not run outcome)
@@ -161,8 +161,8 @@ CREATE TABLE IF NOT EXISTS `test_case` (
 );
 
 CREATE TABLE IF NOT EXISTS `test_step` (
-    `id`              VARCHAR(255) NOT NULL,
-    `test_case_id`    VARCHAR(255) NOT NULL,
+    `id`              VARCHAR(36) NOT NULL,
+    `test_case_id`    VARCHAR(36) NOT NULL,
     `ordinal`         INT          NOT NULL,
     `action`          TEXT,
     `expected_result` TEXT,
@@ -172,11 +172,11 @@ CREATE TABLE IF NOT EXISTS `test_step` (
 );
 
 CREATE TABLE IF NOT EXISTS `test_run` (
-    `id`           VARCHAR(255) NOT NULL,
+    `id`           VARCHAR(36) NOT NULL,
     `title`        VARCHAR(512),
     `description`  TEXT,
     `status`       VARCHAR(32)  NOT NULL DEFAULT 'active', -- values: active|complete|aborted
-    `milestone_id` VARCHAR(255),
+    `milestone_id` VARCHAR(36),
     `started_at`   DATETIME,
     `ended_at`     DATETIME,
     PRIMARY KEY (`id`),
@@ -185,7 +185,7 @@ CREATE TABLE IF NOT EXISTS `test_run` (
 );
 
 CREATE TABLE IF NOT EXISTS `configuration` (
-    `id`          VARCHAR(255) NOT NULL,
+    `id`          VARCHAR(36) NOT NULL,
     `group`       VARCHAR(255) NOT NULL,                   -- e.g. Browser, OS, Environment
     `name`        VARCHAR(255) NOT NULL,                   -- the value, e.g. Chrome
     `description` TEXT,
@@ -196,10 +196,10 @@ CREATE TABLE IF NOT EXISTS `configuration` (
 -- test_result: pure-relationship row. `id` is DERIVED deterministically from
 -- UNIQUE(run_id, test_case_id, configuration_id) (identifiers.md) — not a random ULID.
 CREATE TABLE IF NOT EXISTS `test_result` (
-    `id`               VARCHAR(255) NOT NULL,              -- deterministic over the UNIQUE identity below
-    `run_id`           VARCHAR(255) NOT NULL,
-    `test_case_id`     VARCHAR(255) NOT NULL,
-    `configuration_id` VARCHAR(255),                       -- nullable
+    `id`               VARCHAR(36) NOT NULL,              -- deterministic over the UNIQUE identity below
+    `run_id`           VARCHAR(36) NOT NULL,
+    `test_case_id`     VARCHAR(36) NOT NULL,
+    `configuration_id` VARCHAR(36),                       -- nullable
     `status`           VARCHAR(32),                        -- values: passed|failed|blocked|skipped|invalid|in_progress
     `comment`          TEXT,
     `duration_ms`      INT,
@@ -220,11 +220,11 @@ CREATE TABLE IF NOT EXISTS `test_result` (
 -- ============================================================================
 
 CREATE TABLE IF NOT EXISTS `capability` (
-    `id`        VARCHAR(255) NOT NULL,
+    `id`        VARCHAR(36) NOT NULL,
     `title`     VARCHAR(512),
     `level`     VARCHAR(32),                               -- values: domain|epic|capability
-    `domain_id` VARCHAR(255) NOT NULL,
-    `parent_id` VARCHAR(255),                              -- self-ref
+    `domain_id` VARCHAR(36) NOT NULL,
+    `parent_id` VARCHAR(36),                              -- self-ref
     PRIMARY KEY (`id`),
     INDEX `idx_capability_domain` (`domain_id`),
     INDEX `idx_capability_parent` (`parent_id`),
@@ -233,23 +233,23 @@ CREATE TABLE IF NOT EXISTS `capability` (
 );
 
 CREATE TABLE IF NOT EXISTS `deliverable` (
-    `id`           VARCHAR(255) NOT NULL,
+    `id`           VARCHAR(36) NOT NULL,
     `title`        VARCHAR(512),
     `size`         VARCHAR(8),                             -- values: S|M|L|XL
     `status`       VARCHAR(32)  NOT NULL DEFAULT 'proposed', -- values: proposed|specced|wired|built|ship
     `ai_ready`     VARCHAR(8),                             -- values: yes|no|na
-    `milestone_id` VARCHAR(255),
+    `milestone_id` VARCHAR(36),
     PRIMARY KEY (`id`),
     INDEX `idx_deliverable_milestone` (`milestone_id`),
     CONSTRAINT `fk_deliverable_milestone` FOREIGN KEY (`milestone_id`) REFERENCES `milestone` (`id`) ON DELETE SET NULL
 );
 
 CREATE TABLE IF NOT EXISTS `view` (
-    `id`        VARCHAR(255)  NOT NULL,
+    `id`        VARCHAR(36)  NOT NULL,
     `title`     VARCHAR(512),
     `route`     VARCHAR(1024),                             -- app route
-    `spec_id`   VARCHAR(255),                              -- nullable: set once a spec backs the view
-    `domain_id` VARCHAR(255)  NOT NULL,
+    `spec_id`   VARCHAR(36),                              -- nullable: set once a spec backs the view
+    `domain_id` VARCHAR(36)  NOT NULL,
     PRIMARY KEY (`id`),
     INDEX `idx_view_spec` (`spec_id`),
     INDEX `idx_view_domain` (`domain_id`),
@@ -262,9 +262,9 @@ CREATE TABLE IF NOT EXISTS `view` (
 -- ============================================================================
 
 CREATE TABLE IF NOT EXISTS `entity` (
-    `id`          VARCHAR(255) NOT NULL,
-    `domain_id`   VARCHAR(255) NOT NULL,
-    `spec_id`     VARCHAR(255),                            -- the entity doc; nullable
+    `id`          VARCHAR(36) NOT NULL,
+    `domain_id`   VARCHAR(36) NOT NULL,
+    `spec_id`     VARCHAR(36),                            -- the entity doc; nullable
     `name`        VARCHAR(255) NOT NULL,
     `description` TEXT,
     `status`      VARCHAR(32)  NOT NULL DEFAULT 'draft',   -- values: draft|active|deprecated
@@ -277,8 +277,8 @@ CREATE TABLE IF NOT EXISTS `entity` (
 );
 
 CREATE TABLE IF NOT EXISTS `entity_attribute` (
-    `id`          VARCHAR(255) NOT NULL,
-    `entity_id`   VARCHAR(255) NOT NULL,
+    `id`          VARCHAR(36) NOT NULL,
+    `entity_id`   VARCHAR(36) NOT NULL,
     `name`        VARCHAR(255) NOT NULL,                   -- domain property name
     `description` TEXT,
     `category`    VARCHAR(255),                            -- doc grouping; nullable
@@ -291,9 +291,9 @@ CREATE TABLE IF NOT EXISTS `entity_attribute` (
 );
 
 CREATE TABLE IF NOT EXISTS `entity_relationship` (
-    `id`             VARCHAR(255) NOT NULL,
-    `from_entity_id` VARCHAR(255) NOT NULL,
-    `to_entity_id`   VARCHAR(255) NOT NULL,
+    `id`             VARCHAR(36) NOT NULL,
+    `from_entity_id` VARCHAR(36) NOT NULL,
+    `to_entity_id`   VARCHAR(36) NOT NULL,
     `cardinality`    VARCHAR(32),                          -- values: one_to_one|one_to_many|many_to_many
     `junction_table` VARCHAR(255),                         -- nullable (for m2m)
     `notes`          TEXT,
@@ -304,8 +304,10 @@ CREATE TABLE IF NOT EXISTS `entity_relationship` (
     CONSTRAINT `fk_entity_relationship_to` FOREIGN KEY (`to_entity_id`) REFERENCES `entity` (`id`) ON DELETE CASCADE
 );
 
+-- privilege + access_rule: the authorization layer. DROPPED by migration 0012
+-- (replaced by entity access_control sections); the value comments below are historical.
 CREATE TABLE IF NOT EXISTS `privilege` (
-    `id`       VARCHAR(255) NOT NULL,
+    `id`       VARCHAR(36) NOT NULL,
     `resource` VARCHAR(255) NOT NULL,                      -- e.g. students
     `scope`    VARCHAR(64)  NOT NULL,                      -- configurable (tenant concept); e.g. owned|studio
     `action`   VARCHAR(32)  NOT NULL,                      -- values: view|manage
@@ -314,9 +316,9 @@ CREATE TABLE IF NOT EXISTS `privilege` (
 );
 
 CREATE TABLE IF NOT EXISTS `access_rule` (
-    `id`           VARCHAR(255) NOT NULL,
-    `entity_id`    VARCHAR(255) NOT NULL,
-    `privilege_id` VARCHAR(255) NOT NULL,                  -- the required triple
+    `id`           VARCHAR(36) NOT NULL,
+    `entity_id`    VARCHAR(36) NOT NULL,
+    `privilege_id` VARCHAR(36) NOT NULL,                  -- the required triple
     `condition`    TEXT,                                   -- nullable
     `description`  TEXT,
     PRIMARY KEY (`id`),
@@ -334,11 +336,11 @@ CREATE TABLE IF NOT EXISTS `access_rule` (
 -- UNIQUE(from_type, from_id, to_type, to_id, kind) (identifiers.md). The from/to
 -- links are POLYMORPHIC (type + id over several tables) so they are not FKs.
 CREATE TABLE IF NOT EXISTS `edge` (
-    `id`        VARCHAR(255) NOT NULL,                     -- deterministic over the UNIQUE identity below
+    `id`        VARCHAR(36) NOT NULL,                     -- deterministic over the UNIQUE identity below
     `from_type` VARCHAR(32)  NOT NULL,                     -- values: requirement|spec|user_story|entity|milestone
-    `from_id`   VARCHAR(255) NOT NULL,
+    `from_id`   VARCHAR(36) NOT NULL,
     `to_type`   VARCHAR(32)  NOT NULL,                     -- same domain as from_type
-    `to_id`     VARCHAR(255) NOT NULL,
+    `to_id`     VARCHAR(36) NOT NULL,
     `kind`      VARCHAR(32)  NOT NULL,                     -- values: references|refines|depends_on|supersedes|relates|defers_to
     PRIMARY KEY (`id`),
     UNIQUE KEY `uk_edge_identity` (`from_type`, `from_id`, `to_type`, `to_id`, `kind`),
@@ -351,9 +353,9 @@ CREATE TABLE IF NOT EXISTS `edge` (
 -- ============================================================================
 
 CREATE TABLE IF NOT EXISTS `external_ref` (
-    `id`           VARCHAR(255)  NOT NULL,
+    `id`           VARCHAR(36)  NOT NULL,
     `subject_type` VARCHAR(32)   NOT NULL,                 -- values: deliverable|requirement|test_result
-    `subject_id`   VARCHAR(255)  NOT NULL,                 -- polymorphic (subject_type + subject_id)
+    `subject_id`   VARCHAR(36)  NOT NULL,                 -- polymorphic (subject_type + subject_id)
     `system`       VARCHAR(64)   NOT NULL,                 -- open string: jira|rally|beads|linear|github|other|...
     `external_id`  VARCHAR(255)  NOT NULL,                 -- id/key in that system
     `url`          VARCHAR(1024),                          -- nullable
@@ -367,7 +369,7 @@ CREATE TABLE IF NOT EXISTS `external_ref` (
 -- ============================================================================
 
 CREATE TABLE IF NOT EXISTS `actor` (
-    `id`         VARCHAR(255) NOT NULL,
+    `id`         VARCHAR(36) NOT NULL,
     `kind`       VARCHAR(32)  NOT NULL,                    -- values: human|agent
     `name`       VARCHAR(255),
     `handle`     VARCHAR(255) NOT NULL,                    -- maps to the Dolt committer
@@ -377,10 +379,10 @@ CREATE TABLE IF NOT EXISTS `actor` (
 );
 
 CREATE TABLE IF NOT EXISTS `changeset` (
-    `id`          VARCHAR(255)  NOT NULL,
+    `id`          VARCHAR(36)  NOT NULL,
     `title`       VARCHAR(512),
     `description` TEXT,
-    `author_id`   VARCHAR(255)  NOT NULL,
+    `author_id`   VARCHAR(36)  NOT NULL,
     `status`      VARCHAR(32)   NOT NULL DEFAULT 'draft',  -- values: draft|open|changes_requested|approved|denied|merged|closed
     `branch`      VARCHAR(512)  NOT NULL,                  -- the Dolt branch holding the change
     `base_commit` VARCHAR(64),                             -- merge base
@@ -395,9 +397,9 @@ CREATE TABLE IF NOT EXISTS `changeset` (
 );
 
 CREATE TABLE IF NOT EXISTS `review` (
-    `id`          VARCHAR(255) NOT NULL,
-    `changeset_id` VARCHAR(255) NOT NULL,
-    `reviewer_id` VARCHAR(255) NOT NULL,
+    `id`          VARCHAR(36) NOT NULL,
+    `changeset_id` VARCHAR(36) NOT NULL,
+    `reviewer_id` VARCHAR(36) NOT NULL,
     `verdict`     VARCHAR(32),                             -- values: approve|deny|request_changes
     `summary`     TEXT,
     `created_at`  DATETIME,
@@ -411,13 +413,13 @@ CREATE TABLE IF NOT EXISTS `review` (
 
 -- comment: subject anchor (subject_type + subject_id) is POLYMORPHIC, so not a FK.
 CREATE TABLE IF NOT EXISTS `comment` (
-    `id`           VARCHAR(255) NOT NULL,
-    `changeset_id`  VARCHAR(255) NOT NULL,
-    `author_id`    VARCHAR(255) NOT NULL,
-    `parent_id`    VARCHAR(255),                           -- self-ref for threading; nullable
+    `id`           VARCHAR(36) NOT NULL,
+    `changeset_id`  VARCHAR(36) NOT NULL,
+    `author_id`    VARCHAR(36) NOT NULL,
+    `parent_id`    VARCHAR(36),                           -- self-ref for threading; nullable
     `body`         TEXT,
     `subject_type` VARCHAR(32),                            -- nullable; values: requirement|spec|user_story|test_case|entity|deliverable
-    `subject_id`   VARCHAR(255),                           -- nullable; anchored node
+    `subject_id`   VARCHAR(36),                           -- nullable; anchored node
     `locator`      VARCHAR(512),                           -- field/diff-hunk locator; nullable
     `resolved`     BOOLEAN      NOT NULL DEFAULT FALSE,
     `created_at`   DATETIME,
@@ -437,8 +439,8 @@ CREATE TABLE IF NOT EXISTS `comment` (
 -- ============================================================================
 
 CREATE TABLE IF NOT EXISTS `requirement_test_case` (
-    `requirement_id` VARCHAR(255) NOT NULL,
-    `test_case_id`   VARCHAR(255) NOT NULL,
+    `requirement_id` VARCHAR(36) NOT NULL,
+    `test_case_id`   VARCHAR(36) NOT NULL,
     PRIMARY KEY (`requirement_id`, `test_case_id`),
     INDEX `idx_rtc_test_case` (`test_case_id`),
     CONSTRAINT `fk_rtc_requirement` FOREIGN KEY (`requirement_id`) REFERENCES `requirement` (`id`) ON DELETE CASCADE,
@@ -446,8 +448,8 @@ CREATE TABLE IF NOT EXISTS `requirement_test_case` (
 );
 
 CREATE TABLE IF NOT EXISTS `test_run_configuration` (
-    `run_id`           VARCHAR(255) NOT NULL,
-    `configuration_id` VARCHAR(255) NOT NULL,
+    `run_id`           VARCHAR(36) NOT NULL,
+    `configuration_id` VARCHAR(36) NOT NULL,
     PRIMARY KEY (`run_id`, `configuration_id`),
     INDEX `idx_trc_configuration` (`configuration_id`),
     CONSTRAINT `fk_trc_run` FOREIGN KEY (`run_id`) REFERENCES `test_run` (`id`) ON DELETE CASCADE,
@@ -455,8 +457,8 @@ CREATE TABLE IF NOT EXISTS `test_run_configuration` (
 );
 
 CREATE TABLE IF NOT EXISTS `capability_milestone` (
-    `capability_id` VARCHAR(255) NOT NULL,
-    `milestone_id`  VARCHAR(255) NOT NULL,
+    `capability_id` VARCHAR(36) NOT NULL,
+    `milestone_id`  VARCHAR(36) NOT NULL,
     PRIMARY KEY (`capability_id`, `milestone_id`),
     INDEX `idx_cm_milestone` (`milestone_id`),
     CONSTRAINT `fk_cm_capability` FOREIGN KEY (`capability_id`) REFERENCES `capability` (`id`) ON DELETE CASCADE,
@@ -464,8 +466,8 @@ CREATE TABLE IF NOT EXISTS `capability_milestone` (
 );
 
 CREATE TABLE IF NOT EXISTS `capability_deliverable` (
-    `capability_id`  VARCHAR(255) NOT NULL,
-    `deliverable_id` VARCHAR(255) NOT NULL,
+    `capability_id`  VARCHAR(36) NOT NULL,
+    `deliverable_id` VARCHAR(36) NOT NULL,
     PRIMARY KEY (`capability_id`, `deliverable_id`),
     INDEX `idx_cd_deliverable` (`deliverable_id`),
     CONSTRAINT `fk_cd_capability` FOREIGN KEY (`capability_id`) REFERENCES `capability` (`id`) ON DELETE CASCADE,
@@ -473,8 +475,8 @@ CREATE TABLE IF NOT EXISTS `capability_deliverable` (
 );
 
 CREATE TABLE IF NOT EXISTS `deliverable_view` (
-    `deliverable_id` VARCHAR(255) NOT NULL,
-    `view_id`        VARCHAR(255) NOT NULL,
+    `deliverable_id` VARCHAR(36) NOT NULL,
+    `view_id`        VARCHAR(36) NOT NULL,
     PRIMARY KEY (`deliverable_id`, `view_id`),
     INDEX `idx_dv_view` (`view_id`),
     CONSTRAINT `fk_dv_deliverable` FOREIGN KEY (`deliverable_id`) REFERENCES `deliverable` (`id`) ON DELETE CASCADE,
@@ -482,8 +484,8 @@ CREATE TABLE IF NOT EXISTS `deliverable_view` (
 );
 
 CREATE TABLE IF NOT EXISTS `deliverable_dependency` (
-    `deliverable_id` VARCHAR(255) NOT NULL,
-    `blocked_by_id`  VARCHAR(255) NOT NULL,                -- both → deliverable
+    `deliverable_id` VARCHAR(36) NOT NULL,
+    `blocked_by_id`  VARCHAR(36) NOT NULL,                -- both → deliverable
     PRIMARY KEY (`deliverable_id`, `blocked_by_id`),
     INDEX `idx_dd_blocked_by` (`blocked_by_id`),
     CONSTRAINT `fk_dd_deliverable` FOREIGN KEY (`deliverable_id`) REFERENCES `deliverable` (`id`) ON DELETE CASCADE,

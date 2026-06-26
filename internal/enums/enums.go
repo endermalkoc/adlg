@@ -16,6 +16,58 @@ var (
 	GlossaryStatus = []string{"draft", "active", "deprecated"}
 )
 
+// EntityStatus — ent_entity.status lifecycle. The importer seeds new entities at
+// EntityDraft; promotion is a future CLI write path (the set is here so it validates
+// the moment that path exists, matching DomainStatus/SpecStatus).
+const (
+	EntityDraft      = "draft"
+	EntityActive     = "active"
+	EntityDeprecated = "deprecated"
+)
+
+var EntityStatus = []string{EntityDraft, EntityActive, EntityDeprecated}
+
+// MilestoneStatus — plan_milestone.status lifecycle. The importer seeds milestones at
+// MilestonePending.
+const (
+	MilestoneComplete   = "complete"
+	MilestoneInProgress = "in_progress"
+	MilestonePending    = "pending"
+)
+
+var MilestoneStatus = []string{MilestoneComplete, MilestoneInProgress, MilestonePending}
+
+// ChangesetStatus — rev_changeset.status. A real state machine driven by the changeset
+// verbs: draft (start) → open (submit) → merged (merge) | closed (abandon); review may
+// record changes_requested/approved/denied between open and merge. The verbs reference
+// these constants instead of bare string literals.
+const (
+	ChangesetDraft            = "draft"
+	ChangesetOpen             = "open"
+	ChangesetChangesRequested = "changes_requested"
+	ChangesetApproved         = "approved"
+	ChangesetDenied           = "denied"
+	ChangesetMerged           = "merged"
+	ChangesetClosed           = "closed"
+)
+
+var ChangesetStatus = []string{
+	ChangesetDraft, ChangesetOpen, ChangesetChangesRequested,
+	ChangesetApproved, ChangesetDenied, ChangesetMerged, ChangesetClosed,
+}
+
+// ActorKind — rev_actor.kind. SeedActor writes ActorHuman; agent actors carry ActorAgent.
+const (
+	ActorHuman = "human"
+	ActorAgent = "agent"
+)
+
+var ActorKind = []string{ActorHuman, ActorAgent}
+
+// ReviewVerdict — rev_review.verdict. Defined for documentation/parity; the review CLI
+// that would set it is not built yet (see ROADMAP), so nothing references it today.
+var ReviewVerdict = []string{"approve", "deny", "request_changes"}
+
 // SEED sets — open value-sets with documented defaults that are project-/tenant-/
 // tooling-specific. Unknown values are ACCEPTED with a warning (app.ValidateEnumSoft);
 // --strict restores hard rejection. These are seed/policy, not core — see CLAUDE.md
@@ -23,7 +75,6 @@ var (
 var (
 	DomainKind   = []string{"service", "shared", "infrastructure", "entities", "analysis"}
 	SpecKind     = []string{"feature", "entity", "journey", "analysis", "index", "meta", "reference"}
-	Priority     = []string{"P1", "P2", "P3", "P4", "P5"} // open range; corpus uses P1–P4
 	OptoutMarker = []string{"none", "visual", "ops", "untestable"}
 )
 

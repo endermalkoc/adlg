@@ -22,7 +22,7 @@ var specCmd = &cobra.Command{Use: "spec", Short: "Manage specs"}
 
 var specAddCmd = &cobra.Command{
 	Use:   "add <path>",
-	Short: "Add a spec document under a domain",
+	Short: "Add a spec under a domain (path is domain-relative, e.g. add-student.md)",
 	Args:  cobra.ExactArgs(1),
 	RunE: func(cmd *cobra.Command, args []string) error {
 		ctx := cmd.Context()
@@ -83,7 +83,7 @@ var specAddCmd = &cobra.Command{
 }
 
 func init() {
-	specAddCmd.Flags().StringVar(&specDomain, "domain", "", "owning domain abbreviation (required)")
+	specAddCmd.Flags().StringVar(&specDomain, "domain", "", "owning domain slug (required)")
 	specAddCmd.Flags().StringVar(&specPrefix, "prefix", "", "FR prefix, e.g. ATT (omit for FR-exempt docs)")
 	specAddCmd.Flags().StringVar(&specTitle, "title", "", "spec title")
 	specAddCmd.Flags().StringVar(&specKind, "kind", "feature", "spec kind (feature|entity|journey|analysis|index|meta|reference)")

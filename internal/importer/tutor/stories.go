@@ -41,12 +41,12 @@ func parseStories(prefix, body string) (stories []importer.UserStory, scenarios 
 		if m == nil {
 			continue
 		}
-		ordinal := atoiSafe(m[1])
+		position := atoiSafe(m[1])
 		story := importer.UserStory{
 			SpecPrefix: prefix,
-			Ordinal:    ordinal,
+			Position:   position,
 			Title:      strings.TrimSpace(m[2]),
-			Priority:   m[3],
+			Priority:   priorityNum(m[3]), // "P1" → 1 (req_priority level)
 		}
 		// Block extent: until the next h2/h3 heading.
 		end := len(lines)
@@ -62,7 +62,7 @@ func parseStories(prefix, body string) (stories []importer.UserStory, scenarios 
 		inScenarios := false
 		inLead := true
 		var leadProse []string
-		scnOrdinal := 0
+		scnPosition := 0
 		for bi := 0; bi < len(block); bi++ {
 			ln := block[bi]
 			// The lead ends at the first marker (Why/Independent/Acceptance), a
@@ -125,14 +125,14 @@ func parseStories(prefix, body string) (stories []importer.UserStory, scenarios 
 				bi++
 			}
 			if sm := scenarioRe.FindStringSubmatch(text); sm != nil {
-				scnOrdinal++
+				scnPosition++
 				scenarios = append(scenarios, importer.Scenario{
-					SpecPrefix:   prefix,
-					StoryOrdinal: ordinal,
-					Ordinal:      scnOrdinal,
-					Given:        cleanGWT(sm[1]),
-					When:         cleanGWT(sm[2]),
-					Then:         cleanGWT(sm[3]),
+					SpecPrefix:    prefix,
+					StoryPosition: position,
+					Position:      scnPosition,
+					Given:         cleanGWT(sm[1]),
+					When:          cleanGWT(sm[2]),
+					Then:          cleanGWT(sm[3]),
 				})
 			}
 		}
@@ -188,4 +188,11 @@ func atoiSafe(s string) int {
 		n = n*10 + int(c-'0')
 	}
 	return n
+}
+
+// priorityNum maps a "P{n}" tag to its level (P1→1). The 0–4 scheme reserves 0
+// (Critical) for security/data-loss/broken-build emergencies, which user stories
+// don't carry — so the corpus's P1–P4 land on 1–4.
+func priorityNum(tag string) int {
+	return atoiSafe(strings.TrimPrefix(tag, "P"))
 }

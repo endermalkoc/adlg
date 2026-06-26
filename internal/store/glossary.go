@@ -78,10 +78,10 @@ func SetGlossaryAliases(ctx context.Context, x Execer, termID string, aliases []
 	return nil
 }
 
-// DomainIDByAbbrev looks up a domain's id by its abbreviation (ok=false if absent).
-func DomainIDByAbbrev(ctx context.Context, x Execer, abbrev string) (string, bool, error) {
+// DomainIDBySlug looks up a domain's id by its slug (ok=false if absent).
+func DomainIDBySlug(ctx context.Context, x Execer, slug string) (string, bool, error) {
 	var id string
-	err := x.QueryRowContext(ctx, "SELECT id FROM `req_domain` WHERE abbreviation=?", abbrev).Scan(&id)
+	err := x.QueryRowContext(ctx, "SELECT id FROM `req_domain` WHERE slug=?", slug).Scan(&id)
 	if err == sql.ErrNoRows {
 		return "", false, nil
 	}
@@ -93,20 +93,20 @@ func DomainIDByAbbrev(ctx context.Context, x Execer, abbrev string) (string, boo
 
 // GlossaryTermRow is a glossary term read for rendering (with its domain + aliases).
 type GlossaryTermRow struct {
-	ID           string
-	Slug         string
-	Term         string
-	Definition   string
-	DomainAbbrev string
-	Status       string
-	Aliases      []string
+	ID         string
+	Slug       string
+	Term       string
+	Definition string
+	DomainSlug string
+	Status     string
+	Aliases    []string
 }
 
 // ListGlossaryTerms returns every glossary term ordered by slug, each with its aliases.
 func ListGlossaryTerms(ctx context.Context, x Execer) ([]GlossaryTermRow, error) {
 	rows, err := x.QueryContext(ctx, `
 		SELECT t.id, t.slug, COALESCE(t.term,''), COALESCE(t.definition,''),
-		       COALESCE(d.abbreviation,''), t.status
+		       COALESCE(d.slug,''), t.status
 		FROM `+"`req_glossary_term`"+` t LEFT JOIN `+"`req_domain`"+` d ON t.domain_id = d.id
 		ORDER BY t.slug`)
 	if err != nil {
@@ -117,7 +117,7 @@ func ListGlossaryTerms(ctx context.Context, x Execer) ([]GlossaryTermRow, error)
 	byID := map[string]int{}
 	for rows.Next() {
 		var t GlossaryTermRow
-		if err := rows.Scan(&t.ID, &t.Slug, &t.Term, &t.Definition, &t.DomainAbbrev, &t.Status); err != nil {
+		if err := rows.Scan(&t.ID, &t.Slug, &t.Term, &t.Definition, &t.DomainSlug, &t.Status); err != nil {
 			return nil, err
 		}
 		byID[t.ID] = len(out)

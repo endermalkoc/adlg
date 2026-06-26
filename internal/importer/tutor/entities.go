@@ -49,8 +49,7 @@ func parseEntities(specsDir string, rep *importer.Report) ([]importer.Entity, []
 			RawStatus: status, Status: mapped,
 		}
 		if body, ok := readSpecBody(specsDir, rel); ok {
-			h1, preamble, secs := splitDoc(body)
-			sp.Heading = h1
+			_, preamble, secs := splitDoc(body)
 			routeEntitySections(&ent, preamble, secs)
 		}
 		entities = append(entities, ent)
@@ -84,7 +83,7 @@ func parseEntities(specsDir string, rep *importer.Report) ([]importer.Entity, []
 		entities = append(entities, ent)
 		specs = append(specs, importer.Spec{
 			Prefix: "", Path: rel, Title: name, Domain: "entities", Kind: "entity",
-			Status: mapped, Heading: h1,
+			Status: mapped,
 		})
 	}
 	if unlisted > 0 {

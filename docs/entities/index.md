@@ -15,11 +15,11 @@ files listed below; this index holds the layer overview and the master diagram.
 | File | Layer | Entities |
 |---|---|---|
 | [identifiers.md](identifiers.md) | Identifiers & keys | ULID PKs · business keys · display IDs |
-| [structure.md](structure.md) | Structure | `Domain`, `Spec`, `DocSection` |
-| [requirements.md](requirements.md) | Requirements | `UserStory`, `AcceptanceScenario`, `Requirement`, `RequirementGroup`, `Milestone`, `Edge`, `EntityRef`, `DeliveryStatus` |
+| [structure.md](structure.md) | Structure | `Domain`, `Spec`, `SpecSection`, `SpecSectionType` |
+| [requirements.md](requirements.md) | Requirements | `UserStory`, `AcceptanceScenario`, `Requirement`, `RequirementGroup`, `Milestone`, `Edge`, `EntityRef`, `DeliveryStatus`, `Priority` |
 | [testing.md](testing.md) | Testing (Qase-style) | `TestSuite`, `TestCase`, `TestStep`, `TestRun`, `TestResult`, `Configuration` |
 | [planning.md](planning.md) | Planning | `Capability`, `Deliverable`, `View` + junctions |
-| [authorization.md](authorization.md) | Entity layer | `Entity`, `EntityAttribute`, `EntityRelationship` |
+| [authorization.md](authorization.md) | Entity layer | `Entity`, `EntitySection`, `EntitySectionType`, `EntityAttribute`, `EntityRelationship` |
 | [interop.md](interop.md) | Interop | `ExternalRef` |
 | [glossary.md](glossary.md) | Glossary | `GlossaryTerm`, `GlossaryAlias` |
 | [review.md](review.md) | Review & collaboration | `Changeset`, `Review`, `Comment`, `Actor` |
@@ -28,20 +28,22 @@ files listed below; this index holds the layer overview and the master diagram.
 
 ## Layers
 
-- **Structure** — `Domain`, `Spec`: the document tree (directories derived from `Spec.path`).
-  `Spec` also carries its template sections as typed text (overview, edge_cases, success_criteria,
-  clarifications, …); `DocSection` is the generic catch-all that preserves any non-templated section
-  (heading + body) so a regenerate is information-complete.
+- **Structure** — `Domain`, `Spec`: the document tree (directories derived from `Spec.path`). A spec's
+  prose sections are `SpecSection` rows, each addressed by a curated `SpecSectionType` — the shared
+  vocabulary agents select from (headings outside it fold into `notes` on import; new types cost a
+  deliberate, separate step). Render order is canonical (`SpecSectionType.position`), so structure stays
+  consistent across docs and a regenerate is information-complete.
 - **Requirements** — `UserStory`, `AcceptanceScenario`, `Requirement`, `Milestone`, `Edge`
   (hand-authored, structured relationships), `EntityRef` (prose-derived inline `[[TYPE:key]]` references).
 - **Testing (Qase-style)** — `TestSuite`, `TestCase`, `TestStep`, `TestRun`, `TestResult`,
   `Configuration`; cases cover requirements many-to-many.
 - **Planning** — `Capability`, `Deliverable`, `View`: *what to build*, joined to the corpus
   through shared `Domain` + `Milestone` and a `View → Spec` link.
-- **Entity layer** — `Entity`, `EntityAttribute`, `EntityRelationship`: the business-domain
-  entity glossary. Row-level access is documented as entity-doc prose (a `row_level_access`
-  `DocSection`), not a structured authorization table (the `Privilege`/`AccessRule` model was
-  removed in migration `0012` — see [decisions.md](decisions.md)).
+- **Entity layer** — `Entity`, `EntitySection`/`EntitySectionType` (the entity-doc prose mirror of
+  `SpecSection`), `EntityAttribute`, `EntityRelationship`: the business-domain entity glossary.
+  Row-level access is documented as entity-doc prose (an `access_control` `EntitySection`), not a
+  structured authorization table (the `Privilege`/`AccessRule` model was removed in migration `0012` —
+  see [decisions.md](decisions.md)).
 - **Interop** — `ExternalRef`: a node's id in an outside task system (Jira, Rally, beads, …).
 - **Glossary** — `GlossaryTerm`, `GlossaryAlias`: shared project vocabulary, defined once and
   referenced everywhere via inline `[[TERM:slug]]` links; a first-class cross-reference target.
@@ -63,12 +65,16 @@ erDiagram
     SPEC            ||--o{ REQUIREMENT   : owns
     SPEC            ||--o{ REQUIREMENT_GROUP : "FR groups"
     REQUIREMENT_GROUP ||--o{ REQUIREMENT : groups
-    SPEC            ||--o{ DOC_SECTION   : "extra sections (polymorphic)"
-    ENTITY          ||--o{ DOC_SECTION   : "extra sections (polymorphic)"
+    SPEC            ||--o{ SPEC_SECTION   : "prose sections"
+    SPEC_SECTION    }o--|| SPEC_SECTION_TYPE : "typed by"
+    ENTITY          ||--o{ ENTITY_SECTION : "prose sections"
+    ENTITY_SECTION  }o--|| ENTITY_SECTION_TYPE : "typed by"
     REQUIREMENT     ||--o{ REQUIREMENT   : "sub-requirement of"
     REQUIREMENT     }o--o{ TEST_CASE     : "covered by"
     MILESTONE       |o--o{ REQUIREMENT   : targets
     DELIVERY_STATUS ||--o{ REQUIREMENT   : "classifies (by key, not FK)"
+    PRIORITY        ||--o{ USER_STORY    : "prioritizes (by level, not FK)"
+    PRIORITY        ||--o{ REQUIREMENT   : "prioritizes (by level, not FK)"
     SPEC            ||--o| ENTITY        : documents
 
     TESTSUITE       ||--o{ TESTSUITE     : "parent of"
@@ -110,7 +116,7 @@ erDiagram
 
     DOMAIN {
         bigint id PK
-        string abbreviation UK
+        string slug UK
         string name
         text   description "one-line summary, nullable"
         enum   kind "service|shared|infrastructure|entities|analysis"
@@ -118,23 +124,22 @@ erDiagram
     }
     SPEC {
         bigint id PK
-        bigint domain_id FK
+        bigint domain_id FK "top-level dir; not repeated in path"
         string prefix UK "nullable for FR-exempt"
         string slug "filename"
-        string path UK
+        string path "domain-relative; UK(domain_id, path)"
         string title
         enum   kind "feature|entity|journey|analysis|index|meta|reference"
         enum   status "draft|reviewed|active|obsolete"
-        text   heading "H1 line, verbatim"
         date   created_at
         date   updated_at
     }
     USER_STORY {
         bigint id PK
         bigint spec_id FK
-        int    ordinal "per-spec, no global id"
+        int    position "per-spec, no global id"
         string title
-        enum   priority "P1|P2|P3|P4|P5 (seed)"
+        int    priority "0-4 level → PRIORITY"
         string as_a
         text   i_want
         text   so_that
@@ -145,7 +150,7 @@ erDiagram
     ACCEPTANCE_SCENARIO {
         bigint id PK
         bigint user_story_id FK
-        int    ordinal
+        int    position
         text   given
         text   when
         text   then
@@ -162,6 +167,7 @@ erDiagram
         enum     content_status "draft|active|obsolete"
         enum     delivery_status "covered|test-pending|not-implemented|e2e-sufficient|shared|schema-only|deferred"
         bigint   milestone_id FK "nullable"
+        int      priority "0-4 level → PRIORITY, nullable"
         string   owner
         text     notes
         enum     optout_marker "none|visual|ops|untestable (seed)"
@@ -170,8 +176,15 @@ erDiagram
         datetime created_at
         datetime updated_at
     }
+    PRIORITY {
+        int      level PK "0 Critical .. 4 Backlog"
+        string   label
+        text     description
+        datetime created_at
+        datetime updated_at
+    }
     DELIVERY_STATUS {
-        string   key PK "business value, = requirement.delivery_status"
+        string   slug PK "business value, = requirement.delivery_status"
         string   label
         text     description
         int      sequence
@@ -197,7 +210,7 @@ erDiagram
         text   preconditions
         enum   layer "unit|integration|e2e|component|shared"
         enum   type "functional|smoke|regression|acceptance|other"
-        enum   priority "low|medium|high"
+        int    priority "0-4 level → PRIORITY"
         enum   severity "trivial|minor|normal|major|critical|blocker"
         enum   automation "manual|automated|to_be_automated"
         enum   status "draft|active|deprecated"
@@ -209,7 +222,7 @@ erDiagram
     TEST_STEP {
         bigint id PK
         bigint test_case_id FK
-        int    ordinal
+        int    position
         text   action
         text   expected_result
     }
@@ -249,7 +262,7 @@ erDiagram
     }
     MILESTONE {
         bigint   id PK
-        string   abbreviation UK "e.g. M0..M7, Future"
+        string   slug UK "e.g. M0..M7, Future"
         string   name
         text     description
         int      sequence
@@ -384,14 +397,32 @@ erDiagram
         datetime created_at
         datetime updated_at
     }
-    DOC_SECTION {
+    SPEC_SECTION_TYPE {
+        string slug PK
+        text   title "rendered as the ## heading; empty = headingless"
+        int    level "2=##, 3=###, 0=headingless"
+        int    position "canonical render order"
+        text   description "guidance for picking; nullable"
+        enum   origin "builtin|authored"
+    }
+    SPEC_SECTION {
         bigint id PK
-        enum   owner_type "spec|entity"
-        bigint owner_id FK "polymorphic (owner_type + owner_id)"
-        int    ordinal "original position in the source doc"
-        int    level "heading depth: 2=##, 3=###"
-        string section_key "known section id (overview, edge_cases, purpose, …); NULL = bespoke"
-        text   heading
+        bigint spec_id FK
+        string section_type_slug FK "curated type; NOT NULL"
+        text   body
+    }
+    ENTITY_SECTION_TYPE {
+        string slug PK
+        text   title "rendered as the ## heading; empty = headingless"
+        int    level "2=##, 0=headingless"
+        int    position "canonical render order"
+        text   description "guidance for picking; nullable"
+        enum   origin "builtin|authored"
+    }
+    ENTITY_SECTION {
+        bigint id PK
+        bigint entity_id FK
+        string section_type_slug FK "curated type; NOT NULL"
         text   body
     }
 ```

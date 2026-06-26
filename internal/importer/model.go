@@ -9,7 +9,7 @@
 package importer
 
 // Graph is a source corpus parsed into ASDF's entity shapes. Rows are keyed by
-// business identifiers (domain abbreviation, spec prefix, fr_key, …) because at
+// business identifiers (domain slug, spec prefix, fr_key, …) because at
 // parse time no ULIDs or foreign keys exist yet.
 type Graph struct {
 	Domains    []Domain      `json:"domains"`
@@ -30,14 +30,14 @@ type Entity struct {
 	Status      string `json:"status"`   // mapped to entity.status (draft|active|deprecated)
 	DocPath     string `json:"doc_path"` // entities/<file>.md
 
-	// All entity-doc sections (verbatim Markdown) → doc_section: recognized ones
-	// (purpose, key_concepts, …) carry a section_key; bespoke ones carry "".
+	// Entity-doc prose → ent_entity_section, each addressed by a curated section key
+	// (purpose, key_concepts, …); unrecognized headings fold into `notes`.
 	Sections []DocSection `json:"sections,omitempty"`
 }
 
 // Domain ← a top-level directory under specs/, described in specs/index.md.
 type Domain struct {
-	Abbrev      string `json:"abbrev"`      // directory name, e.g. "enrollment"
+	Slug        string `json:"slug"`        // directory name, e.g. "enrollment"
 	Name        string `json:"name"`        // title-cased label
 	Kind        string `json:"kind"`        // service|shared|entities|infrastructure
 	Description string `json:"description"` // from index.md → domain.description (added in 0002)
@@ -49,16 +49,15 @@ type Spec struct {
 	Prefix    string `json:"prefix"`     // e.g. ADDS (empty for FR-exempt docs)
 	Path      string `json:"path"`       // relative to specs/, e.g. enrollment/add-student.md
 	Title     string `json:"title"`      // frontmatter title
-	Domain    string `json:"domain"`     // domain abbrev (registry column)
+	Domain    string `json:"domain"`     // domain slug (registry column)
 	Kind      string `json:"kind"`       // feature|entity|journey|index|meta|reference
 	RawStatus string `json:"raw_status"` // source status verbatim: Draft|Reviewed|Active
 	Status    string `json:"status"`     // mapped to ASDF spec.status (draft|active|obsolete)
 
-	// Heading is the H1 identity line (kept on spec). All prose sections →
-	// doc_section: recognized ones (overview, edge_cases, success_criteria,
-	// platform_scope, assumptions, clarifications, preamble, more_info) carry a
-	// section_key; bespoke ones carry "".
-	Heading     string       `json:"heading,omitempty"`
+	// Prose sections → req_spec_section, each addressed by a curated section key
+	// (overview, edge_cases, success_criteria, scope, assumptions, open_questions,
+	// preamble, more_info); unrecognized headings fold into `notes`. The H1 is
+	// rendered from Title (no separate heading is stored).
 	KeyEntities []string     `json:"key_entities,omitempty"` // entity names → spec→entity refs
 	Sections    []DocSection `json:"sections,omitempty"`
 	ReqGroups   []ReqGroup   `json:"req_groups,omitempty"` // FR group sub-headers + notes
@@ -72,16 +71,14 @@ type ReqGroup struct {
 	Note     string `json:"note,omitempty"`
 }
 
-// DocSection is a document section preserved verbatim. Key is the normalized
-// section id for a recognized section (overview, edge_cases, purpose, …) or "" for
-// a bespoke one. For keyed sections only Body is load-bearing (the generator renders
-// them at a canonical position); Level/Heading matter only for bespoke sections.
+// DocSection is one prose section bound for the curated section model: Key is its
+// section-type key (overview, edge_cases, purpose, notes, …) and Body its Markdown.
+// Heading/level/order are not carried — they come from the section type on render
+// (migration 0013). One DocSection per distinct key per owner (the importer merges
+// collisions, notably the `notes` fold target).
 type DocSection struct {
-	Ordinal int    `json:"ordinal"`
-	Level   int    `json:"level"`
-	Heading string `json:"heading"`
-	Body    string `json:"body"`
-	Key     string `json:"key,omitempty"`
+	Key  string `json:"key"`
+	Body string `json:"body"`
 }
 
 // Requirement ← an fr-registry/**.yml entry (authoritative existence + status),
@@ -106,9 +103,9 @@ type Requirement struct {
 // UserStory ← a "### User Story N - Title (Priority: PN)" heading + its As-a line.
 type UserStory struct {
 	SpecPrefix      string `json:"spec_prefix"`
-	Ordinal         int    `json:"ordinal"`
+	Position        int    `json:"position"`
 	Title           string `json:"title"`
-	Priority        string `json:"priority"` // P1|P2|P3
+	Priority        int    `json:"priority"` // 0–4 (req_priority level); corpus P1–P4 → 1–4
 	AsA             string `json:"as_a"`
 	IWant           string `json:"i_want"`
 	SoThat          string `json:"so_that"`
@@ -119,10 +116,10 @@ type UserStory struct {
 
 // Scenario ← a numbered "Given/When/Then" line under a story's Acceptance Scenarios.
 type Scenario struct {
-	SpecPrefix   string `json:"spec_prefix"`
-	StoryOrdinal int    `json:"story_ordinal"`
-	Ordinal      int    `json:"ordinal"`
-	Given        string `json:"given"`
+	SpecPrefix    string `json:"spec_prefix"`
+	StoryPosition int    `json:"story_position"`
+	Position      int    `json:"position"`
+	Given         string `json:"given"`
 	When         string `json:"when"`
 	Then         string `json:"then"`
 }
@@ -134,7 +131,7 @@ type Scenario struct {
 // separate Edge layer, not produced by import.)
 type EntityRef struct {
 	OwnerType  string `json:"owner_type"`  // domain|spec|requirement|user_story|entity
-	OwnerKey   string `json:"owner_key"`   // business key (path|fr_key|name|abbreviation)
+	OwnerKey   string `json:"owner_key"`   // business key (path|fr_key|name|slug)
 	TargetType string `json:"target_type"` // domain|spec|requirement|entity|milestone
 	TargetKey  string `json:"target_key"`  // business key of the target
 	Kind       string `json:"kind"`        // references
@@ -142,7 +139,7 @@ type EntityRef struct {
 
 // Milestone ← a distinct milestone value referenced by the registry.
 type Milestone struct {
-	Abbrev string `json:"abbrev"`
+	Slug string `json:"slug"`
 }
 
 // ---- report ----------------------------------------------------------------

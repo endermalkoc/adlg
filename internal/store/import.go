@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"time"
 
+	"github.com/endermalkoc/asdf/internal/enums"
 	"github.com/endermalkoc/asdf/internal/ids"
 )
 
@@ -20,13 +21,13 @@ import (
 
 // Milestone is the importable subset of a milestone row.
 type Milestone struct {
-	ID           string
-	Abbreviation string
-	Name         string
-	Status       string
+	ID     string
+	Slug   string
+	Name   string
+	Status string
 }
 
-// UpsertDomain upserts by abbreviation.
+// UpsertDomain upserts by slug.
 func UpsertDomain(ctx context.Context, x Execer, d Domain) (string, bool, error) {
 	if d.Kind == "" {
 		d.Kind = "service"
@@ -35,15 +36,15 @@ func UpsertDomain(ctx context.Context, x Execer, d Domain) (string, bool, error)
 		d.Status = "active"
 	}
 	var id string
-	err := x.QueryRowContext(ctx, "SELECT id FROM `req_domain` WHERE abbreviation=?", d.Abbreviation).Scan(&id)
+	err := x.QueryRowContext(ctx, "SELECT id FROM `req_domain` WHERE slug=?", d.Slug).Scan(&id)
 	switch {
 	case err == sql.ErrNoRows:
 		id = ids.New()
 		_, err = x.ExecContext(ctx,
-			"INSERT INTO `req_domain` (id,abbreviation,name,description,kind,status) VALUES (?,?,?,?,?,?)",
-			id, d.Abbreviation, d.Name, nullIfEmpty(d.Description), d.Kind, d.Status)
+			"INSERT INTO `req_domain` (id,slug,name,description,kind,status) VALUES (?,?,?,?,?,?)",
+			id, d.Slug, d.Name, nullIfEmpty(d.Description), d.Kind, d.Status)
 		if err != nil {
-			return "", false, fmt.Errorf("insert domain %q: %w", d.Abbreviation, err)
+			return "", false, fmt.Errorf("insert domain %q: %w", d.Slug, err)
 		}
 		return id, true, nil
 	case err != nil:
@@ -53,27 +54,27 @@ func UpsertDomain(ctx context.Context, x Execer, d Domain) (string, bool, error)
 		"UPDATE `req_domain` SET name=?, description=?, kind=?, status=? WHERE id=?",
 		d.Name, nullIfEmpty(d.Description), d.Kind, d.Status, id)
 	if err != nil {
-		return "", false, fmt.Errorf("update domain %q: %w", d.Abbreviation, err)
+		return "", false, fmt.Errorf("update domain %q: %w", d.Slug, err)
 	}
 	return id, false, nil
 }
 
-// UpsertMilestone upserts by abbreviation.
+// UpsertMilestone upserts by slug.
 func UpsertMilestone(ctx context.Context, x Execer, m Milestone) (string, bool, error) {
 	if m.Status == "" {
-		m.Status = "pending"
+		m.Status = enums.MilestonePending
 	}
 	var id string
-	err := x.QueryRowContext(ctx, "SELECT id FROM `plan_milestone` WHERE abbreviation=?", m.Abbreviation).Scan(&id)
+	err := x.QueryRowContext(ctx, "SELECT id FROM `plan_milestone` WHERE slug=?", m.Slug).Scan(&id)
 	switch {
 	case err == sql.ErrNoRows:
 		id = ids.New()
 		now := time.Now().UTC()
 		_, err = x.ExecContext(ctx,
-			"INSERT INTO `plan_milestone` (id,abbreviation,name,status,created_at,updated_at) VALUES (?,?,?,?,?,?)",
-			id, m.Abbreviation, nullIfEmpty(m.Name), m.Status, now, now)
+			"INSERT INTO `plan_milestone` (id,slug,name,status,created_at,updated_at) VALUES (?,?,?,?,?,?)",
+			id, m.Slug, nullIfEmpty(m.Name), m.Status, now, now)
 		if err != nil {
-			return "", false, fmt.Errorf("insert milestone %q: %w", m.Abbreviation, err)
+			return "", false, fmt.Errorf("insert milestone %q: %w", m.Slug, err)
 		}
 		return id, true, nil
 	case err != nil:
@@ -100,16 +101,17 @@ func UpsertSpec(ctx context.Context, x Execer, domainID string, sp Spec) (string
 	if sp.Prefix != "" {
 		err = x.QueryRowContext(ctx, "SELECT id FROM `req_spec` WHERE prefix=?", sp.Prefix).Scan(&id)
 	} else {
-		err = x.QueryRowContext(ctx, "SELECT id FROM `req_spec` WHERE path=?", sp.Path).Scan(&id)
+		// path is domain-relative → unique only within a domain.
+		err = x.QueryRowContext(ctx, "SELECT id FROM `req_spec` WHERE domain_id=? AND path=?", sp.DomainID, sp.Path).Scan(&id)
 	}
 	now := time.Now().UTC()
 	switch {
 	case err == sql.ErrNoRows:
 		id = ids.New()
 		_, err = x.ExecContext(ctx,
-			"INSERT INTO `req_spec` (id,domain_id,prefix,slug,path,title,kind,status,heading,created_at,updated_at) VALUES (?,?,?,?,?,?,?,?,?,?,?)",
+			"INSERT INTO `req_spec` (id,domain_id,prefix,slug,path,title,kind,status,created_at,updated_at) VALUES (?,?,?,?,?,?,?,?,?,?)",
 			id, sp.DomainID, nullIfEmpty(sp.Prefix), nullIfEmpty(sp.Slug), sp.Path, nullIfEmpty(sp.Title), sp.Kind, sp.Status,
-			nullIfEmpty(sp.Heading), now, now)
+			now, now)
 		if err != nil {
 			return "", false, fmt.Errorf("insert spec %q: %w", sp.Path, err)
 		}
@@ -118,9 +120,9 @@ func UpsertSpec(ctx context.Context, x Execer, domainID string, sp Spec) (string
 		return "", false, err
 	}
 	_, err = x.ExecContext(ctx,
-		"UPDATE `req_spec` SET domain_id=?, slug=?, path=?, title=?, kind=?, status=?, heading=?, updated_at=? WHERE id=?",
+		"UPDATE `req_spec` SET domain_id=?, slug=?, path=?, title=?, kind=?, status=?, updated_at=? WHERE id=?",
 		sp.DomainID, nullIfEmpty(sp.Slug), sp.Path, nullIfEmpty(sp.Title), sp.Kind, sp.Status,
-		nullIfEmpty(sp.Heading), now, id)
+		now, id)
 	if err != nil {
 		return "", false, fmt.Errorf("update spec %q: %w", sp.Path, err)
 	}
@@ -148,9 +150,9 @@ func UpsertRequirement(ctx context.Context, x Execer, specID string, r Requireme
 	case err == sql.ErrNoRows:
 		id = ids.New()
 		_, err = x.ExecContext(ctx,
-			"INSERT INTO `req_requirement` (id,spec_id,number,suffix,fr_key,statement,content_status,delivery_status,milestone_id,owner,notes,optout_marker,group_id,position,created_at,updated_at) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)",
+			"INSERT INTO `req_requirement` (id,spec_id,number,suffix,fr_key,statement,content_status,delivery_status,milestone_id,owner,notes,optout_marker,group_id,position,priority,created_at,updated_at) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)",
 			id, specID, r.Number, nullIfEmpty(r.Suffix), r.FRKey, nullIfEmpty(r.Statement), r.ContentStatus,
-			nullIfEmpty(r.DeliveryStatus), nullIfEmpty(r.MilestoneID), nullIfEmpty(r.Owner), nullIfEmpty(r.Notes), r.OptoutMarker, nullIfEmpty(r.GroupID), r.Position, now, now)
+			nullIfEmpty(r.DeliveryStatus), nullIfEmpty(r.MilestoneID), nullIfEmpty(r.Owner), nullIfEmpty(r.Notes), r.OptoutMarker, nullIfEmpty(r.GroupID), r.Position, nullIfNil(r.Priority), now, now)
 		if err != nil {
 			return "", false, fmt.Errorf("insert requirement %q: %w", r.FRKey, err)
 		}
@@ -197,9 +199,9 @@ func UpsertRequirementGroup(ctx context.Context, x Execer, specID string, positi
 // UserStory is the importable subset of a user_story row.
 type UserStory struct {
 	SpecID          string
-	Ordinal         int
+	Position        int
 	Title           string
-	Priority        string
+	Priority        int // 0–4 (req_priority); a story always has one
 	AsA             string
 	IWant           string
 	SoThat          string
@@ -208,19 +210,19 @@ type UserStory struct {
 	IndependentTest string
 }
 
-// UpsertUserStory upserts by (spec_id, ordinal).
+// UpsertUserStory upserts by (spec_id, position).
 func UpsertUserStory(ctx context.Context, x Execer, us UserStory) (string, bool, error) {
 	var id string
 	err := x.QueryRowContext(ctx,
-		"SELECT id FROM `req_user_story` WHERE spec_id=? AND ordinal=?", us.SpecID, us.Ordinal).Scan(&id)
+		"SELECT id FROM `req_user_story` WHERE spec_id=? AND position=?", us.SpecID, us.Position).Scan(&id)
 	switch {
 	case err == sql.ErrNoRows:
 		id = ids.New()
 		_, err = x.ExecContext(ctx,
-			"INSERT INTO `req_user_story` (id,spec_id,ordinal,title,priority,as_a,i_want,so_that,narrative,why_priority,independent_test) VALUES (?,?,?,?,?,?,?,?,?,?,?)",
-			id, us.SpecID, us.Ordinal, nullIfEmpty(us.Title), nullIfEmpty(us.Priority), nullIfEmpty(us.AsA), nullIfEmpty(us.IWant), nullIfEmpty(us.SoThat), nullIfEmpty(us.Narrative), nullIfEmpty(us.WhyPriority), nullIfEmpty(us.IndependentTest))
+			"INSERT INTO `req_user_story` (id,spec_id,position,title,priority,as_a,i_want,so_that,narrative,why_priority,independent_test) VALUES (?,?,?,?,?,?,?,?,?,?,?)",
+			id, us.SpecID, us.Position, nullIfEmpty(us.Title), us.Priority, nullIfEmpty(us.AsA), nullIfEmpty(us.IWant), nullIfEmpty(us.SoThat), nullIfEmpty(us.Narrative), nullIfEmpty(us.WhyPriority), nullIfEmpty(us.IndependentTest))
 		if err != nil {
-			return "", false, fmt.Errorf("insert user_story %s#%d: %w", us.SpecID, us.Ordinal, err)
+			return "", false, fmt.Errorf("insert user_story %s#%d: %w", us.SpecID, us.Position, err)
 		}
 		return id, true, nil
 	case err != nil:
@@ -228,9 +230,9 @@ func UpsertUserStory(ctx context.Context, x Execer, us UserStory) (string, bool,
 	}
 	_, err = x.ExecContext(ctx,
 		"UPDATE `req_user_story` SET title=?, priority=?, as_a=?, i_want=?, so_that=?, narrative=?, why_priority=?, independent_test=? WHERE id=?",
-		nullIfEmpty(us.Title), nullIfEmpty(us.Priority), nullIfEmpty(us.AsA), nullIfEmpty(us.IWant), nullIfEmpty(us.SoThat), nullIfEmpty(us.Narrative), nullIfEmpty(us.WhyPriority), nullIfEmpty(us.IndependentTest), id)
+		nullIfEmpty(us.Title), us.Priority, nullIfEmpty(us.AsA), nullIfEmpty(us.IWant), nullIfEmpty(us.SoThat), nullIfEmpty(us.Narrative), nullIfEmpty(us.WhyPriority), nullIfEmpty(us.IndependentTest), id)
 	if err != nil {
-		return "", false, fmt.Errorf("update user_story %s#%d: %w", us.SpecID, us.Ordinal, err)
+		return "", false, fmt.Errorf("update user_story %s#%d: %w", us.SpecID, us.Position, err)
 	}
 	return id, false, nil
 }
@@ -238,26 +240,26 @@ func UpsertUserStory(ctx context.Context, x Execer, us UserStory) (string, bool,
 // Scenario is the importable subset of an acceptance_scenario row.
 type Scenario struct {
 	UserStoryID string
-	Ordinal     int
+	Position    int
 	Given       string
 	When        string
 	Then        string
 }
 
-// UpsertScenario upserts by (user_story_id, ordinal). There is no UNIQUE on that
+// UpsertScenario upserts by (user_story_id, position). There is no UNIQUE on that
 // pair, so existence is checked explicitly.
 func UpsertScenario(ctx context.Context, x Execer, s Scenario) (string, bool, error) {
 	var id string
 	err := x.QueryRowContext(ctx,
-		"SELECT id FROM `req_acceptance_scenario` WHERE user_story_id=? AND ordinal=?", s.UserStoryID, s.Ordinal).Scan(&id)
+		"SELECT id FROM `req_acceptance_scenario` WHERE user_story_id=? AND position=?", s.UserStoryID, s.Position).Scan(&id)
 	switch {
 	case err == sql.ErrNoRows:
 		id = ids.New()
 		_, err = x.ExecContext(ctx,
-			"INSERT INTO `req_acceptance_scenario` (id,user_story_id,ordinal,`given`,`when`,`then`) VALUES (?,?,?,?,?,?)",
-			id, s.UserStoryID, s.Ordinal, nullIfEmpty(s.Given), nullIfEmpty(s.When), nullIfEmpty(s.Then))
+			"INSERT INTO `req_acceptance_scenario` (id,user_story_id,position,`given`,`when`,`then`) VALUES (?,?,?,?,?,?)",
+			id, s.UserStoryID, s.Position, nullIfEmpty(s.Given), nullIfEmpty(s.When), nullIfEmpty(s.Then))
 		if err != nil {
-			return "", false, fmt.Errorf("insert scenario %s#%d: %w", s.UserStoryID, s.Ordinal, err)
+			return "", false, fmt.Errorf("insert scenario %s#%d: %w", s.UserStoryID, s.Position, err)
 		}
 		return id, true, nil
 	case err != nil:
@@ -267,7 +269,7 @@ func UpsertScenario(ctx context.Context, x Execer, s Scenario) (string, bool, er
 		"UPDATE `req_acceptance_scenario` SET `given`=?, `when`=?, `then`=? WHERE id=?",
 		nullIfEmpty(s.Given), nullIfEmpty(s.When), nullIfEmpty(s.Then), id)
 	if err != nil {
-		return "", false, fmt.Errorf("update scenario %s#%d: %w", s.UserStoryID, s.Ordinal, err)
+		return "", false, fmt.Errorf("update scenario %s#%d: %w", s.UserStoryID, s.Position, err)
 	}
 	return id, false, nil
 }
@@ -301,9 +303,9 @@ func UpsertExternalRef(ctx context.Context, x Execer, subjectType, subjectID, sy
 	return id, false, nil
 }
 
-// Entity is the importable subset of an entity row. Its prose sections now live in
-// doc_section keyed by section_key (migration 0010); description is the glossary
-// one-liner (not a section).
+// Entity is the importable subset of an entity row. Its prose sections live in
+// ent_entity_section (typed by ent_entity_section_type, migration 0013); description is
+// the glossary one-liner (not a section).
 type Entity struct {
 	Name        string
 	Description string
@@ -314,7 +316,7 @@ type Entity struct {
 // (may be empty → NULL).
 func UpsertEntity(ctx context.Context, x Execer, domainID, specID string, e Entity) (string, bool, error) {
 	if e.Status == "" {
-		e.Status = "draft"
+		e.Status = enums.EntityDraft
 	}
 	var id string
 	err := x.QueryRowContext(ctx, "SELECT id FROM `ent_entity` WHERE name=?", e.Name).Scan(&id)
@@ -340,48 +342,97 @@ func UpsertEntity(ctx context.Context, x Execer, domainID, specID string, e Enti
 	return id, false, nil
 }
 
-// UpsertDocSection upserts a document section by (owner_type, owner_id, ordinal). A
-// recognized section carries a sectionKey (overview, edge_cases, …); a bespoke one
-// passes "". Callers reconcile the owner's full set with DeleteDocSectionsByOwner first.
-func UpsertDocSection(ctx context.Context, x Execer, ownerType, ownerID string, ordinal, level int, heading, body, sectionKey string) (string, bool, error) {
+// upsertSection upserts one prose section by (ownerID, sectionTypeKey) — the natural
+// key. Body-only; heading/level/order come from the curated type. Callers reconcile the
+// owner's full set with the matching Delete*Sections* first.
+func upsertSection(ctx context.Context, x Execer, sectionTable, ownerCol, ownerID, sectionTypeKey, body string) (string, bool, error) {
 	var id string
 	err := x.QueryRowContext(ctx,
-		"SELECT id FROM `req_doc_section` WHERE owner_type=? AND owner_id=? AND ordinal=?",
-		ownerType, ownerID, ordinal).Scan(&id)
+		"SELECT id FROM `"+sectionTable+"` WHERE "+ownerCol+"=? AND section_type_slug=?",
+		ownerID, sectionTypeKey).Scan(&id)
 	switch {
 	case err == sql.ErrNoRows:
 		id = ids.New()
 		_, err = x.ExecContext(ctx,
-			"INSERT INTO `req_doc_section` (id,owner_type,owner_id,ordinal,level,heading,body,section_key) VALUES (?,?,?,?,?,?,?,?)",
-			id, ownerType, ownerID, ordinal, level, nullIfEmpty(heading), nullIfEmpty(body), nullIfEmpty(sectionKey))
+			"INSERT INTO `"+sectionTable+"` (id,"+ownerCol+",section_type_slug,body) VALUES (?,?,?,?)",
+			id, ownerID, sectionTypeKey, nullIfEmpty(body))
 		if err != nil {
-			return "", false, fmt.Errorf("insert doc_section %s/%s#%d: %w", ownerType, ownerID, ordinal, err)
+			return "", false, fmt.Errorf("insert %s %s/%s: %w", sectionTable, ownerID, sectionTypeKey, err)
 		}
 		return id, true, nil
 	case err != nil:
 		return "", false, err
 	}
-	_, err = x.ExecContext(ctx,
-		"UPDATE `req_doc_section` SET level=?, heading=?, body=?, section_key=? WHERE id=?",
-		level, nullIfEmpty(heading), nullIfEmpty(body), nullIfEmpty(sectionKey), id)
+	_, err = x.ExecContext(ctx, "UPDATE `"+sectionTable+"` SET body=? WHERE id=?", nullIfEmpty(body), id)
 	if err != nil {
-		return "", false, fmt.Errorf("update doc_section %s/%s#%d: %w", ownerType, ownerID, ordinal, err)
+		return "", false, fmt.Errorf("update %s %s/%s: %w", sectionTable, ownerID, sectionTypeKey, err)
 	}
 	return id, false, nil
 }
 
-// DeleteDocSectionsByOwner removes every doc_section owned by one node — the first
-// step of per-owner reconciliation, so a re-import with a changed section set leaves
-// no orphans (mirrors DeleteEntityRefsByOwner).
-func DeleteDocSectionsByOwner(ctx context.Context, x Execer, ownerType, ownerID string) error {
+func deleteSectionsByOwner(ctx context.Context, x Execer, sectionTable, ownerCol, ownerID string) error {
 	if _, err := x.ExecContext(ctx,
-		"DELETE FROM `req_doc_section` WHERE owner_type=? AND owner_id=?",
-		ownerType, ownerID); err != nil {
-		return fmt.Errorf("delete doc_sections for %s %s: %w", ownerType, ownerID, err)
+		"DELETE FROM `"+sectionTable+"` WHERE "+ownerCol+"=?", ownerID); err != nil {
+		return fmt.Errorf("delete sections from %s for %s: %w", sectionTable, ownerID, err)
 	}
 	return nil
 }
 
+// UpsertSpecSection / UpsertEntitySection write one prose section (body) under a spec /
+// entity, addressed by its curated section-type key.
+func UpsertSpecSection(ctx context.Context, x Execer, specID, sectionTypeKey, body string) (string, bool, error) {
+	return upsertSection(ctx, x, "req_spec_section", "spec_id", specID, sectionTypeKey, body)
+}
+func UpsertEntitySection(ctx context.Context, x Execer, entityID, sectionTypeKey, body string) (string, bool, error) {
+	return upsertSection(ctx, x, "ent_entity_section", "entity_id", entityID, sectionTypeKey, body)
+}
+
+// DeleteSpecSectionsBySpec / DeleteEntitySectionsByEntity remove an owner's sections —
+// the first step of per-owner reconciliation, so a re-import leaves no orphans.
+func DeleteSpecSectionsBySpec(ctx context.Context, x Execer, specID string) error {
+	return deleteSectionsByOwner(ctx, x, "req_spec_section", "spec_id", specID)
+}
+func DeleteEntitySectionsByEntity(ctx context.Context, x Execer, entityID string) error {
+	return deleteSectionsByOwner(ctx, x, "ent_entity_section", "entity_id", entityID)
+}
+
+// upsertSectionType inserts/updates one curated section-type row (the lookup vocabulary).
+// Used by the `section-type add` CLI; the importer never writes types (they are seeded).
+func upsertSectionType(ctx context.Context, x Execer, typeTable string, t SectionTypeRow) (bool, error) {
+	if t.Origin == "" {
+		t.Origin = "authored"
+	}
+	var existing string
+	err := x.QueryRowContext(ctx, "SELECT slug FROM `"+typeTable+"` WHERE slug=?", t.Key).Scan(&existing)
+	args := []any{nullIfEmpty(t.Title), t.Level, t.Position, nullIfEmpty(t.Description), t.Origin}
+	switch {
+	case err == sql.ErrNoRows:
+		_, err = x.ExecContext(ctx,
+			"INSERT INTO `"+typeTable+"` (slug,title,level,position,description,origin) VALUES (?,?,?,?,?,?)",
+			append([]any{t.Key}, args...)...)
+		if err != nil {
+			return false, fmt.Errorf("insert section type %q: %w", t.Key, err)
+		}
+		return true, nil
+	case err != nil:
+		return false, err
+	}
+	_, err = x.ExecContext(ctx,
+		"UPDATE `"+typeTable+"` SET title=?, level=?, position=?, description=?, origin=? WHERE slug=?",
+		append(args, t.Key)...)
+	if err != nil {
+		return false, fmt.Errorf("update section type %q: %w", t.Key, err)
+	}
+	return false, nil
+}
+
+// UpsertSpecSectionType / UpsertEntitySectionType add (or update) a curated section type.
+func UpsertSpecSectionType(ctx context.Context, x Execer, t SectionTypeRow) (bool, error) {
+	return upsertSectionType(ctx, x, "req_spec_section_type", t)
+}
+func UpsertEntitySectionType(ctx context.Context, x Execer, t SectionTypeRow) (bool, error) {
+	return upsertSectionType(ctx, x, "ent_entity_section_type", t)
+}
 
 // AddEdgeByIDs links two nodes by resolved ids with a deterministic edge id
 // (idempotent via INSERT IGNORE). Unlike AddEdge it does not resolve fr_keys, so

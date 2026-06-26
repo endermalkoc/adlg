@@ -271,9 +271,9 @@ func parseRegistry(registryDir string, stmtByKey map[string]frStatement, rep *im
 
 	var milestones []importer.Milestone
 	for m := range milestoneSet {
-		milestones = append(milestones, importer.Milestone{Abbrev: m})
+		milestones = append(milestones, importer.Milestone{Slug: m})
 	}
-	sort.Slice(milestones, func(i, j int) bool { return milestones[i].Abbrev < milestones[j].Abbrev })
+	sort.Slice(milestones, func(i, j int) bool { return milestones[i].Slug < milestones[j].Slug })
 
 	// Summary findings (one each, not one per row).
 	if noStatement > 0 {

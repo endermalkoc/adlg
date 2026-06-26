@@ -10,11 +10,11 @@
 -- Like `edge`, the surrogate `id` is derived deterministically (uuidv5) from the
 -- UNIQUE identity so the same ref created on two branches converges on merge.
 CREATE TABLE IF NOT EXISTS `entity_ref` (
-    `id`          VARCHAR(255) NOT NULL,                  -- deterministic over the UNIQUE identity below
+    `id`          VARCHAR(36) NOT NULL,                  -- deterministic over the UNIQUE identity below
     `owner_type`  VARCHAR(32)  NOT NULL,                  -- values: domain|spec|requirement|user_story|entity|milestone
-    `owner_id`    VARCHAR(255) NOT NULL,
+    `owner_id`    VARCHAR(36) NOT NULL,
     `target_type` VARCHAR(32)  NOT NULL,                  -- values: domain|spec|requirement|entity|milestone
-    `target_id`   VARCHAR(255) NOT NULL,
+    `target_id`   VARCHAR(36) NOT NULL,
     `kind`        VARCHAR(32)  NOT NULL,                  -- values: references
     PRIMARY KEY (`id`),
     UNIQUE KEY `uk_entity_ref_identity` (`owner_type`, `owner_id`, `target_type`, `target_id`, `kind`),

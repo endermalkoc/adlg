@@ -16,7 +16,7 @@ trees.
 | Attribute | Type | Key | Notes |
 |---|---|---|---|
 | `id` | bigint / uuid | **PK** | |
-| `abbreviation` | varchar | **UK** | |
+| `slug` | varchar | **UK** | |
 | `name` | varchar | | Canonical name |
 | `description` | text | | One-line summary (from the domain index); nullable |
 | `kind` | enum | | `service`, `shared`, `infrastructure`, `entities`, `analysis` |
@@ -24,49 +24,70 @@ trees.
 
 ## Spec
 A document — one `.md` file — and the unit that owns FR numbering. The directory tree is
-**derived from `path`** (no separate folder table); `path` is the full docs-relative
-location. FR-bearing specs have a unique `prefix`; FR-exempt docs (entity glossary,
+**derived from `domain.slug + "/" + path`** (no separate folder table); `path` itself is
+**domain-relative** so the domain isn't duplicated as the leading segment. FR-bearing specs
+have a unique `prefix`; FR-exempt docs (entity glossary,
 journeys, analysis, index/meta) have `prefix = NULL` and a `kind` that classifies them.
 
 | Attribute | Type | Key | Notes |
 |---|---|---|---|
 | `id` | bigint / uuid | **PK** | |
-| `domain_id` | FK → Domain | | From frontmatter `domain` (also the first path segment) |
+| `domain_id` | FK → Domain | | From frontmatter `domain`; the **sole** home of the domain — it is the top-level output directory and is **not** repeated in `path` |
 | `prefix` | varchar | **UK** | 2–6 upper; **nullable** for FR-exempt docs |
 | `slug` | varchar | | Filename without extension |
-| `path` | varchar | **UK** | Full docs-relative path; **source of the directory tree** |
+| `path` | varchar | **UK** (`domain_id`,`path`) | **Domain-relative** path (no leading domain segment). Full location = `domain.slug + "/" + path`; relative paths aren't globally unique, so the key is `(domain_id, path)` (migration `0017`) |
 | `title` | varchar | | |
 | `kind` | enum | | `feature`, `entity`, `journey`, `analysis`, `index`, `meta`, `reference` |
 | `status` | enum | | `draft`, `reviewed`, `active`, `obsolete` (`reviewed` = under review, before active) |
-| `heading` | text | | The H1 line verbatim (may differ from `title`); nullable. **Not a section** — the document's identity line (the `#`) |
 | `created_at` / `updated_at` | date | | From spec header |
 
+> The document's H1 is rendered from `title` (`# {title}`). The spec carries no separate
+> `heading` column — the verbatim H1's kind-prefix (`Feature Specification:` …) was a
+> corpus-ism derivable from `kind`, so `title` is the single spec label (migration `0019`).
+
 > **Section capture.** A spec's structured content (user stories, acceptance scenarios,
-> requirements) is modeled in the [requirements layer](requirements.md). **All of its prose sections** —
-> the recurring template ones (`overview`, `edge_cases`, `success_criteria`, `platform_scope`,
-> `assumptions`, `clarifications`, `preamble`, the FR-area `more_info` tail) **and** the bespoke tail —
-> are captured as [`DocSection`](#docsection) rows: a recognized section carries a normalized `section_key`
-> (e.g. `overview`), a bespoke one carries `section_key = NULL`. This keeps the core generic (a different
-> corpus's sections just get keys or go bespoke — no schema change) while a regenerate stays
-> information-complete. "Key Entities" lists are also captured as `spec → entity`
+> requirements) is modeled in the [requirements layer](requirements.md). Its **prose sections** are
+> captured as [`SpecSection`](#specsection) rows, each pointing at a curated
+> [`SpecSectionType`](#specsectiontype) — there are **no free-form sections**. A section *type*
+> defines the title, depth, and canonical render position once; an *instance* just carries the body.
+> The curated vocabulary is selected from, not invented per-document: headings outside it **fold into
+> the `notes` type** on import, and adding a new type is a deliberate, separate step (so the vocabulary
+> stays small and shared). "Key Entities" lists are also captured as `spec → entity`
 > [`EntityRef`](requirements.md#entityref)s.
 
-## DocSection
-The model for **every document section** — recurring template sections (addressed by `section_key`) and
-the bespoke tail (`section_key = NULL`) — keeping a regenerate information-complete. Replaced the former
-per-section typed columns on `Spec`/`Entity` (migration `0010`). Its owner is **polymorphic** (`spec` or
-`entity`), so it is not an FK.
+## SpecSectionType
+The **curated vocabulary** of spec prose sections — the set agents and importers *select from* rather
+than invent. A built-in seed ships with migration `0013`; new types may be added later at a deliberate
+cost (a dedicated CLI call, not an inline flag), keeping the vocabulary from sprawling.
+
+| Attribute | Type | Key | Notes |
+|---|---|---|---|
+| `slug` | varchar | **PK** | Stable id the CLI/importer selects by (`overview`, `success_criteria`, …). Named `slug`, not the SQL reserved word `key` |
+| `title` | text | | The section's title, rendered as the `##` heading; `""`/nullable = headingless intro (e.g. `preamble`) |
+| `level` | int | | Heading depth: `2` = `##`, `3` = `###`, `0` = headingless |
+| `position` | int | | Canonical render order — **uniform across every doc** |
+| `description` | text | | Guidance shown when picking a type; nullable |
+| `origin` | enum | | `builtin` (seed) or `authored` (added later) |
+
+> Seed keys: `preamble`, `overview`, `edge_cases`, `more_info`, `success_criteria`, `assumptions`,
+> `scope`, `open_questions`, `notes`. `edge_cases` and `more_info` are **block-owned** — rendered inside
+> their structural anchor (below), not as standalone sections.
+
+## SpecSection
+One prose section of a spec, addressed by its curated type. Title, depth, and order all come from the
+[`SpecSectionType`](#specsectiontype); the instance carries only the body.
 
 | Attribute | Type | Key | Notes |
 |---|---|---|---|
 | `id` | bigint / uuid | **PK** | |
-| `owner_type` | enum | | `spec`, `entity` |
-| `owner_id` | bigint / uuid | | Polymorphic (type + id) |
-| `ordinal` | int | | Original position in the source doc (unique per owner) |
-| `section_key` | varchar | | Normalized id of a recognized section (`overview`, `edge_cases`, `purpose`, …); **`NULL` for a bespoke section** |
-| `level` | int | | Heading depth: `2` = `##`, `3` = `###` (a `0`/empty-heading row is bare intro prose, e.g. `preamble`) |
-| `heading` | text | | The section heading (don't-care for keyed sections — they render at a canonical spot) |
+| `spec_id` | FK → Spec | | `ON DELETE CASCADE` |
+| `section_type_slug` | FK → SpecSectionType | | The curated type — **`NOT NULL`** |
 | `body` | text | | The section's Markdown body, verbatim |
 
-> `UNIQUE(owner_type, owner_id, ordinal)` and `UNIQUE(owner_type, owner_id, section_key)` — the latter
-> permits many bespoke rows (NULLs are distinct), one row per recognized key.
+> `UNIQUE(spec_id, section_type_slug)` — at most one section of each type per spec.
+
+> **Render order is canonical.** Generation emits sections in `SpecSectionType.position` order (not
+> source order). Two structural blocks are interleaved at fixed positions and own two section types:
+> **User Scenarios & Testing** (user stories + `edge_cases`) and **Requirements** (the FR list +
+> `more_info`). The same `SpecSectionType`/`SpecSection` pair has an entity-layer mirror —
+> [`EntitySectionType`](authorization.md#entitysectiontype) / [`EntitySection`](authorization.md#entitysection).

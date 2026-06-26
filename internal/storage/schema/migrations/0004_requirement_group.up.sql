@@ -9,8 +9,8 @@
 -- number. Replaces the denormalized `requirement.section` string column.
 
 CREATE TABLE IF NOT EXISTS `requirement_group` (
-    `id`       VARCHAR(255) NOT NULL,
-    `spec_id`  VARCHAR(255) NOT NULL,
+    `id`       VARCHAR(36) NOT NULL,
+    `spec_id`  VARCHAR(36) NOT NULL,
     `position` INT          NOT NULL,            -- order of the group within the spec's FR list
     `header`   VARCHAR(512) NOT NULL,            -- the bold sub-header text
     `note`     TEXT,                             -- interspersed prose (e.g. a "> See [shared/X]" blockquote)
@@ -21,7 +21,7 @@ CREATE TABLE IF NOT EXISTS `requirement_group` (
 );
 
 ALTER TABLE `requirement`
-    ADD COLUMN `group_id` VARCHAR(255),          -- FK → requirement_group; null for ungrouped FRs
+    ADD COLUMN `group_id` VARCHAR(36),          -- FK → requirement_group; null for ungrouped FRs
     ADD COLUMN `position` INT;                   -- document order within the spec's FR list
 
 ALTER TABLE `requirement`

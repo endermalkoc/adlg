@@ -31,29 +31,58 @@ _None — all resolved (see below)._
   and agent-change diffs come from `dolt_history_*` / `dolt_diff_*` / `dolt_log` /
   `dolt_blame_*`.
 - **Document sections are captured so a regenerate is information-complete** (migration `0003`,
-  simplified by `0010`). Goal: `asdf generate` must reproduce the *information* of the source docs
-  (format may differ). **All prose sections live in [`DocSection`](structure.md#docsection)** — a
-  recognized template section (feature-spec `overview`/`edge_cases`/`success_criteria`/`platform_scope`/
-  `assumptions`/`clarifications`/`preamble`/`more_info`; entity `purpose`/`key_concepts`/…) carries a
-  normalized `section_key`; a bespoke one carries `section_key = NULL`. The per-story
+  simplified by `0010`, restructured by `0013`). Goal: `asdf generate` must reproduce the *information*
+  of the source docs (format may differ). A spec's prose sections are
+  [`SpecSection`](structure.md#specsection) rows, each addressed by a curated
+  [`SpecSectionType`](structure.md#specsectiontype) (title/level/canonical position live on the type);
+  entity docs mirror this with [`EntitySection`](authorization.md#entitysection) /
+  [`EntitySectionType`](authorization.md#entitysectiontype). There are **no free-form sections** — a
+  heading outside the curated vocabulary folds into the `notes` type on import. The per-story
   `why_priority`/`independent_test` and the FR group are still **promoted** from prose. The FR group is a
   first-class [`RequirementGroup`](requirements.md#requirementgroup) (migration `0004`, replacing the
   earlier denormalized `Requirement.section`): it carries the group's `position`, `header`, and the
   interspersed `note`, and requirements link to it by document `position` — so the FR list regenerates in
   **source order**, with grouping and notes intact. **Key Entities** lists become `spec → entity`
-  references. `Spec.heading` (the H1 identity line) and `Entity.description` (the glossary one-liner)
-  stay columns — they are identity, not sections. Generation emits a fixed canonical section order —
-  order/format may differ from the source, information does not. `EntityAttribute`/`EntityRelationship`
-  stay the optional finer structured extraction over the same prose, not a second source of truth
-  (`row_level_access` has no structured table — see the authz-removal decision below).
-- **Migration `0010` collapses the per-section typed columns into `DocSection`** — the original `0003`
-  modeled recurring sections as ~17 typed `TEXT` columns on `Spec`/`Entity`, which **duplicated** the
-  generic `DocSection` model and baked one corpus's doc template into the **core** schema (against the
-  [CLAUDE.md](../../CLAUDE.md) "keep the core generic" invariant). `0010` drops those columns and adds a
-  nullable `DocSection.section_key` so every section is one model (keyed or bespoke). Output is **unchanged**
-  (the generator looks recognized sections up by key at the same canonical positions); it's a storage
-  simplification. Like the `0004` `Requirement.section`→`RequirementGroup` move, it is DDL-only — section
-  content is import-only (`AddSpec` writes none), so a re-import repopulates.
+  references. The spec's H1 renders from `Spec.title`; `Entity.description` (the glossary one-liner)
+  stays a column — these are identity, not sections. Generation emits a fixed canonical section order
+  (`SpecSectionType.position`) — order/format may differ from the source, information does not.
+  `EntityAttribute`/`EntityRelationship` stay the optional finer structured extraction over the same
+  prose, not a second source of truth (`access_control` has no structured table — see the authz-removal
+  decision below).
+- **Migration `0013` makes the section vocabulary curated and typed** (superseding the `0003`→`0010`
+  arc). `0003` modeled recurring sections as ~17 typed `TEXT` columns; `0010` collapsed them into one
+  polymorphic `DocSection` with a nullable `section_key` (recognized) / `NULL` (bespoke). Both let a
+  document carry **unbounded one-off sections**, and `0010` still baked the corpus template into the
+  generator (every heading/level/order hardcoded). `0013` replaces `DocSection` with **four typed
+  tables** — `req_spec_section_type` / `req_spec_section` and the `ent_*` mirror: a curated
+  **section-type lookup** (the vocabulary agents *select from* — a built-in `origin = builtin` seed,
+  extensible only at a deliberate cost: a separate `section-type add` CLI call, never an inline flag)
+  plus a **section instance** that must reference a type (`NOT NULL`; no bespoke). Title, level, and
+  canonical `position` live on the type, so render order is **uniform across all docs**. **The
+  byte-identical tutor round-trip is retired as the acceptance gate** — documents now *conform to* the
+  curated vocabulary (unrecognized headings fold into `notes`); the new gate is "every imported section
+  resolves to a seeded type." Two structural blocks (User Scenarios & Testing, Requirements) stay in the
+  generator and own the `edge_cases`/`more_info` types — the only schema↔renderer coupling. Like
+  `0004`/`0010` it is DDL-only + re-import (section content is import-only; the down-migration restores
+  table shape, not git-ignored content). This intentionally re-splits what `0010` unified: `DocSection`
+  has exactly two stable, first-class owners (spec, entity), so typed FK tables buy referential
+  integrity that the polymorphic table could not, at the cost of mirrored structure.
+- **`Spec.path` is domain-relative** (migration `0017`). The domain previously appeared twice — as
+  `domain_id` and as the leading segment of `path` — which could drift (rename a domain and the prefix
+  goes stale). `path` now stores the location **relative to its domain**; the full docs path is
+  reconstructed as `domain.slug + "/" + path` by the generator and the ref resolver, and the top-level
+  output directory therefore *always* equals the domain. The UNIQUE key moves from `(path)` to
+  `(domain_id, path)` (a domain-relative path like `index.md` isn't globally unique). A spec whose source
+  file sat under a directory other than its tagged domain (the corpus had 4) now renders under its
+  domain — the classification wins. DDL + re-import (paths repopulate in relative form).
+- **`position` and `title` are the standard column names** (migration `0019`). Two columns meant
+  *document order* under different names — `ordinal` on `UserStory`/`AcceptanceScenario`/`TestStep`,
+  `position` everywhere else; standardized on `position`. Likewise a section *type*'s heading text is
+  `title` (matching `UserStory.title` etc.), not `heading`. `Spec` previously carried **both** `title`
+  (the frontmatter label) and `heading` (the verbatim H1, e.g. `Feature Specification: Add New
+  Student`); they were **not** redundant, but the H1's kind-prefix is derivable from `Spec.kind` (a
+  corpus-ism), so `heading` is **dropped** and the H1 renders as `# {title}` — `title` is the single
+  spec label. DDL rename/drop; re-import repopulates.
 - **ER refinements from the tutor import** (validated by `asdf import tutor`, the read-only
   parse-and-report adapter — `internal/importer/tutor`). Five pieces of source data had no clean
   home; the resolutions keep the core generic:
@@ -70,7 +99,7 @@ _None — all resolved (see below)._
     registry entries put a `tut-xxxx` beads id in the `milestone` field. That is an interop
     reference: `ExternalRef{subject_type: requirement, system: beads, external_id: tut-xxxx}`. No
     schema change (`ExternalRef` already covers it).
-  - **`backlog` is a valid milestone value** — `Milestone.abbreviation` is an open string with
+  - **`backlog` is a valid milestone value** — `Milestone.slug` is an open string with
     seed examples (`M0`–`M7`, `Future`); `backlog` joins them as seed/policy data, not a new column.
 - **Changeset is the unit of batched, reviewable change** (the `Changeset` entity, formerly
   `ChangeProposal`). A changeset is a **Dolt branch** that bundles edits across many entities
@@ -86,8 +115,8 @@ _None — all resolved (see below)._
   (the Cross-references feature; see [ROADMAP.md](../ROADMAP.md)). An author/agent writes a
   canonical token in any text field — `[[REQ:ATT-FR-012]]`, optional display
   `[[REQ:ATT-FR-012|the attendance rule]]` — where `TYPE:key` resolves over the existing business
-  keys: `DOMAIN`(abbreviation) · `SPEC`(prefix, else path) · `REQ`(fr_key) · `ENTITY`(name) ·
-  `MILESTONE`(abbreviation) · `TERM`(glossary — deferred until `GlossaryTerm` lands). At ingestion the
+  keys: `DOMAIN`(slug) · `SPEC`(prefix, else path) · `REQ`(fr_key) · `ENTITY`(name) ·
+  `MILESTONE`(slug) · `TERM`(glossary — deferred until `GlossaryTerm` lands). At ingestion the
   token is **validated, kept verbatim in the text** (for rendering), **and projected into a queryable
   `entity_ref` row** (owner→target, `kind=references`). The token stays the source of truth; `EntityRef`
   is its reconciled projection (re-derived per owner on each write — so removing a link removes its row).
@@ -97,8 +126,8 @@ _None — all resolved (see below)._
     via `edge add`). `impact`/`check` read **both**. (This reclassifies the importer's former ~600
     prose-derived `references` edges into `entity_ref`.)
   - **Source attribution** is the nearest first-class node owning the text: a link inside a scenario,
-    `DocSection`, or `RequirementGroup.note` attributes to its owning user_story / spec. Self-references
-    are ignored (no self-ref row).
+    `SpecSection`/`EntitySection`, or `RequirementGroup.note` attributes to its owning user_story / spec /
+    entity. Self-references are ignored (no self-ref row).
   - **Dangling refs** (token that resolves to nothing): **block** an interactive CLI/MCP write
     (`--force` overrides); **record a non-blocking finding** on bulk import; a `check` finding once
     `asdf check` exists.
@@ -134,8 +163,8 @@ _None — all resolved (see below)._
   triple-based, "never role names" — into the core schema (against the [CLAUDE.md](../../CLAUDE.md)
   "keep the core generic" invariant), and it was **never consumed**: nothing read `AccessRule`, and
   `Privilege` was write-only (the tutor importer filled it; no command or generator read it). The access
-  content humans see is rendered from the `row_level_access` [`DocSection`](structure.md#docsection) prose,
-  so dropping both tables leaves **generated output byte-identical**. The tutor importer's privilege parser
+  content humans see is rendered from the `access_control` [`EntitySection`](authorization.md#entitysection)
+  prose, so dropping both tables left **generated output byte-identical** at the time. The tutor importer's privilege parser
   and the `Privilege.scope`/`action` seed enums were removed with it. A *generic*, consumer-driven
   authorization concept can return when there is a real reader for it — see [ROADMAP](../ROADMAP.md).
 - **Enum policy: three buckets — closed / seed / table** (the schema stores every enum as `VARCHAR`, so this is
@@ -144,14 +173,17 @@ _None — all resolved (see below)._
   - **closed** — fixed lifecycle/workflow + structural discriminators (`*.status`, `Edge.kind`, the polymorphic
     `*_type`, `cardinality`, `verdict`, …). Validated hard; unknown rejected (`enums.Valid`).
   - **seed** — open value-sets with documented defaults that are project-/tenant-/tooling-specific:
-    `Domain.kind`, `Spec.kind`, `UserStory.priority` (widened to P1–P5; the corpus already holds P4),
+    `Domain.kind`, `Spec.kind`,
     `Requirement.optout_marker` (corpus carries none; the FR-marker parser is forward-looking),
     and the Qase `TestCase.*` taxonomies. Validated **leniently** — `app.ValidateEnumSoft` accepts an unknown
     value with a warning; `--strict` restores hard rejection. Import never rejects (it warns), matching the
     existing `unknown-delivery-status` finding.
-  - **table** — `Requirement.delivery_status`, the one value-set that carries policy, graduates to a
-    [`delivery_status`](requirements.md#deliverystatus) lookup table (seeded in migration `0009`). It is keyed
-    by its **business value** (not a ULID — a deliberate exception, like a classic reference table) and
+  - **table** — value-sets graduate to seeded lookup tables. `Requirement.delivery_status`, the one that
+    carries policy → [`delivery_status`](requirements.md#deliverystatus) (migration `0009`). And **priority**:
+    the inconsistent per-entity schemes (`UserStory` `P1`–`P3`, `TestCase` `low`/`med`/`high`) are unified into
+    the standard 0–4 [`Priority`](requirements.md#priority) table (migration `0018`), stored as the INT `level`
+    and applied to `UserStory`/`Requirement`/`TestCase`. Both are keyed
+    by their **business value** (not a ULID — a deliberate exception, like a classic reference table) and
     referenced by `requirement.delivery_status` **with no FK**, on purpose: the lookup is *soft* so drift is
     tolerated and surfaced by `check`, never rejected at write (record this rationale — a reviewer who sees the
     schema's ~43 FKs should not "fix" it by adding the constraint). The coverage policy (e2e/shared/milestone

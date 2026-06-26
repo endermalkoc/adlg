@@ -8,23 +8,22 @@ import (
 // This file holds read queries used by the generator (internal/generate) to
 // reconstruct documents from the canonical database. Plain reads, no transaction.
 
-// SpecRow is a spec joined to its domain abbreviation. Prose sections live in
-// doc_section (keyed by section_key); only the H1 heading stays on the spec.
+// SpecRow is a spec joined to its domain slug. Prose sections live in
+// req_spec_section (typed by req_spec_section_type); the H1 is rendered from `title`.
 type SpecRow struct {
-	ID           string `json:"id"`
-	DomainAbbrev string `json:"domain"`
-	Prefix       string `json:"prefix,omitempty"`
-	Path         string `json:"path"`
-	Title        string `json:"title,omitempty"`
-	Kind         string `json:"kind"`
-	Status       string `json:"status"`
-	Heading      string `json:"heading,omitempty"`
+	ID         string `json:"id"`
+	DomainSlug string `json:"domain"`
+	Prefix     string `json:"prefix,omitempty"`
+	Path       string `json:"path"`
+	Title      string `json:"title,omitempty"`
+	Kind       string `json:"kind"`
+	Status     string `json:"status"`
 }
 
-// ListSpecs returns every spec with its domain abbreviation, by path.
+// ListSpecs returns every spec with its domain slug, by path.
 func ListSpecs(ctx context.Context, x Execer) ([]SpecRow, error) {
 	rows, err := x.QueryContext(ctx, `
-		SELECT s.id, d.abbreviation, COALESCE(s.prefix,''), s.path, COALESCE(s.title,''), s.kind, s.status, COALESCE(s.heading,'')
+		SELECT s.id, d.slug, COALESCE(s.prefix,''), s.path, COALESCE(s.title,''), s.kind, s.status
 		FROM `+"`req_spec`"+` s JOIN `+"`req_domain`"+` d ON s.domain_id = d.id
 		ORDER BY s.path`)
 	if err != nil {
@@ -34,7 +33,7 @@ func ListSpecs(ctx context.Context, x Execer) ([]SpecRow, error) {
 	var out []SpecRow
 	for rows.Next() {
 		var s SpecRow
-		if err := rows.Scan(&s.ID, &s.DomainAbbrev, &s.Prefix, &s.Path, &s.Title, &s.Kind, &s.Status, &s.Heading); err != nil {
+		if err := rows.Scan(&s.ID, &s.DomainSlug, &s.Prefix, &s.Path, &s.Title, &s.Kind, &s.Status); err != nil {
 			return nil, err
 		}
 		out = append(out, s)
@@ -45,9 +44,9 @@ func ListSpecs(ctx context.Context, x Execer) ([]SpecRow, error) {
 // StoryRow is a user story with the id needed to fetch its scenarios.
 type StoryRow struct {
 	ID              string
-	Ordinal         int
+	Position        int
 	Title           string
-	Priority        string
+	Priority        int // 0–4 (req_priority)
 	AsA             string
 	IWant           string
 	SoThat          string
@@ -56,12 +55,12 @@ type StoryRow struct {
 	IndependentTest string
 }
 
-// ListStoriesBySpec returns a spec's user stories ordered by heading number.
+// ListStoriesBySpec returns a spec's user stories in document order.
 func ListStoriesBySpec(ctx context.Context, x Execer, specID string) ([]StoryRow, error) {
 	rows, err := x.QueryContext(ctx, `
-		SELECT id, ordinal, COALESCE(title,''), COALESCE(priority,''), COALESCE(as_a,''), COALESCE(i_want,''),
+		SELECT id, position, COALESCE(title,''), COALESCE(priority,0), COALESCE(as_a,''), COALESCE(i_want,''),
 		       COALESCE(so_that,''), COALESCE(narrative,''), COALESCE(why_priority,''), COALESCE(independent_test,'')
-		FROM `+"`req_user_story`"+` WHERE spec_id=? ORDER BY ordinal`, specID)
+		FROM `+"`req_user_story`"+` WHERE spec_id=? ORDER BY position`, specID)
 	if err != nil {
 		return nil, err
 	}
@@ -69,7 +68,7 @@ func ListStoriesBySpec(ctx context.Context, x Execer, specID string) ([]StoryRow
 	var out []StoryRow
 	for rows.Next() {
 		var s StoryRow
-		if err := rows.Scan(&s.ID, &s.Ordinal, &s.Title, &s.Priority, &s.AsA, &s.IWant, &s.SoThat, &s.Narrative, &s.WhyPriority, &s.IndependentTest); err != nil {
+		if err := rows.Scan(&s.ID, &s.Position, &s.Title, &s.Priority, &s.AsA, &s.IWant, &s.SoThat, &s.Narrative, &s.WhyPriority, &s.IndependentTest); err != nil {
 			return nil, err
 		}
 		out = append(out, s)
@@ -77,19 +76,59 @@ func ListStoriesBySpec(ctx context.Context, x Execer, specID string) ([]StoryRow
 	return out, rows.Err()
 }
 
+// PriorityRow is one level of the standard 0–4 priority taxonomy (req_priority).
+type PriorityRow struct {
+	Level       int    `json:"level"`
+	Label       string `json:"label"`
+	Description string `json:"description,omitempty"`
+}
+
+// ListPriorities returns the priority levels in order (0 = most urgent).
+func ListPriorities(ctx context.Context, x Execer) ([]PriorityRow, error) {
+	rows, err := x.QueryContext(ctx, "SELECT level, label, COALESCE(description,'') FROM `req_priority` ORDER BY level")
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var out []PriorityRow
+	for rows.Next() {
+		var p PriorityRow
+		if err := rows.Scan(&p.Level, &p.Label, &p.Description); err != nil {
+			return nil, err
+		}
+		out = append(out, p)
+	}
+	return out, rows.Err()
+}
+
+// PriorityByLevel returns one priority level (ok=false if absent) — the validation point.
+func PriorityByLevel(ctx context.Context, x Execer, level int) (PriorityRow, bool, error) {
+	var p PriorityRow
+	err := x.QueryRowContext(ctx,
+		"SELECT level, label, COALESCE(description,'') FROM `req_priority` WHERE level=?", level).
+		Scan(&p.Level, &p.Label, &p.Description)
+	if err == sql.ErrNoRows {
+		return PriorityRow{}, false, nil
+	}
+	if err != nil {
+		return PriorityRow{}, false, err
+	}
+	return p, true, nil
+}
+
 // ScenarioRow is one acceptance scenario.
 type ScenarioRow struct {
-	Ordinal int
-	Given   string
-	When    string
-	Then    string
+	Position int
+	Given    string
+	When     string
+	Then     string
 }
 
 // ListScenariosByStory returns a story's acceptance scenarios in order.
 func ListScenariosByStory(ctx context.Context, x Execer, storyID string) ([]ScenarioRow, error) {
 	rows, err := x.QueryContext(ctx, `
-		SELECT ordinal, COALESCE(`+"`given`"+`,''), COALESCE(`+"`when`"+`,''), COALESCE(`+"`then`"+`,'')
-		FROM `+"`req_acceptance_scenario`"+` WHERE user_story_id=? ORDER BY ordinal`, storyID)
+		SELECT position, COALESCE(`+"`given`"+`,''), COALESCE(`+"`when`"+`,''), COALESCE(`+"`then`"+`,'')
+		FROM `+"`req_acceptance_scenario`"+` WHERE user_story_id=? ORDER BY position`, storyID)
 	if err != nil {
 		return nil, err
 	}
@@ -97,7 +136,7 @@ func ListScenariosByStory(ctx context.Context, x Execer, storyID string) ([]Scen
 	var out []ScenarioRow
 	for rows.Next() {
 		var s ScenarioRow
-		if err := rows.Scan(&s.Ordinal, &s.Given, &s.When, &s.Then); err != nil {
+		if err := rows.Scan(&s.Position, &s.Given, &s.When, &s.Then); err != nil {
 			return nil, err
 		}
 		out = append(out, s)
@@ -119,11 +158,11 @@ type ReqRow struct {
 
 // ListReqsBySpecID returns a spec's requirements in document order (position;
 // unpositioned registry-only FRs sort last by number), with the milestone
-// abbreviation resolved (empty when none).
+// slug resolved (empty when none).
 func ListReqsBySpecID(ctx context.Context, x Execer, specID string) ([]ReqRow, error) {
 	rows, err := x.QueryContext(ctx, `
 		SELECT r.fr_key, r.number, COALESCE(r.suffix,''), COALESCE(r.group_id,''), COALESCE(r.position,0), COALESCE(r.statement,''),
-		       COALESCE(r.delivery_status,''), COALESCE(m.abbreviation,'')
+		       COALESCE(r.delivery_status,''), COALESCE(m.slug,'')
 		FROM `+"`req_requirement`"+` r
 		LEFT JOIN `+"`plan_milestone`"+` m ON r.milestone_id = m.id
 		WHERE r.spec_id=? ORDER BY (r.position = 0 OR r.position IS NULL), r.position, r.number, r.suffix`, specID)
@@ -201,34 +240,130 @@ func ListEntities(ctx context.Context, x Execer) ([]EntityRow, error) {
 	return out, rows.Err()
 }
 
-// DocSectionRow is one document section: a recognized one carries SectionKey
-// (overview, edge_cases, …); a bespoke one has SectionKey == "".
-type DocSectionRow struct {
-	Ordinal    int
-	Level      int
-	Heading    string
-	Body       string
-	SectionKey string
+// SectionTypeRow is one curated section-type lookup row: the title/level/position
+// that drive how a section of this type renders. Shared shape across the spec and entity
+// vocabularies (req_spec_section_type / ent_entity_section_type).
+type SectionTypeRow struct {
+	Key         string
+	Title       string
+	Level       int
+	Position    int
+	Description string
+	Origin      string
 }
 
-// ListDocSections returns an owner's sections in original order.
-func ListDocSections(ctx context.Context, x Execer, ownerType, ownerID string) ([]DocSectionRow, error) {
-	rows, err := x.QueryContext(ctx, `
-		SELECT ordinal, level, COALESCE(heading,''), COALESCE(body,''), COALESCE(section_key,'')
-		FROM `+"`req_doc_section`"+` WHERE owner_type=? AND owner_id=? ORDER BY ordinal`, ownerType, ownerID)
+// SectionTypeRow.Key maps to the `slug` column (named slug, not the reserved word key).
+const sectionTypeCols = "slug, COALESCE(title,''), level, position, COALESCE(description,''), origin"
+
+func scanSectionType(s interface{ Scan(...any) error }, t *SectionTypeRow) error {
+	return s.Scan(&t.Key, &t.Title, &t.Level, &t.Position, &t.Description, &t.Origin)
+}
+
+func listSectionTypes(ctx context.Context, x Execer, typeTable string) ([]SectionTypeRow, error) {
+	rows, err := x.QueryContext(ctx,
+		"SELECT "+sectionTypeCols+" FROM `"+typeTable+"` ORDER BY position, slug")
 	if err != nil {
 		return nil, err
 	}
 	defer rows.Close()
-	var out []DocSectionRow
+	var out []SectionTypeRow
 	for rows.Next() {
-		var d DocSectionRow
-		if err := rows.Scan(&d.Ordinal, &d.Level, &d.Heading, &d.Body, &d.SectionKey); err != nil {
+		var t SectionTypeRow
+		if err := scanSectionType(rows, &t); err != nil {
 			return nil, err
 		}
-		out = append(out, d)
+		out = append(out, t)
 	}
 	return out, rows.Err()
+}
+
+func sectionTypeByKey(ctx context.Context, x Execer, typeTable, key string) (SectionTypeRow, bool, error) {
+	var t SectionTypeRow
+	err := scanSectionType(
+		x.QueryRowContext(ctx, "SELECT "+sectionTypeCols+" FROM `"+typeTable+"` WHERE slug=?", key), &t)
+	if err == sql.ErrNoRows {
+		return SectionTypeRow{}, false, nil
+	}
+	if err != nil {
+		return SectionTypeRow{}, false, err
+	}
+	return t, true, nil
+}
+
+// ListSpecSectionTypes / ListEntitySectionTypes return the curated vocabulary in render order.
+func ListSpecSectionTypes(ctx context.Context, x Execer) ([]SectionTypeRow, error) {
+	return listSectionTypes(ctx, x, "req_spec_section_type")
+}
+func ListEntitySectionTypes(ctx context.Context, x Execer) ([]SectionTypeRow, error) {
+	return listSectionTypes(ctx, x, "ent_entity_section_type")
+}
+
+// SpecSectionTypeByKey / EntitySectionTypeByKey resolve one type (ok=false if absent) —
+// the friction point: an interactive write rejects a section whose type does not exist.
+func SpecSectionTypeByKey(ctx context.Context, x Execer, key string) (SectionTypeRow, bool, error) {
+	return sectionTypeByKey(ctx, x, "req_spec_section_type", key)
+}
+func EntitySectionTypeByKey(ctx context.Context, x Execer, key string) (SectionTypeRow, bool, error) {
+	return sectionTypeByKey(ctx, x, "ent_entity_section_type", key)
+}
+
+// SectionRow is one rendered prose section: the body plus the title/level/position
+// looked up from its curated type (joined). Returned in canonical render order.
+type SectionRow struct {
+	Key      string
+	Title    string
+	Level    int
+	Position int
+	Body     string
+}
+
+func listSections(ctx context.Context, x Execer, sectionTable, typeTable, ownerCol, ownerID string) ([]SectionRow, error) {
+	rows, err := x.QueryContext(ctx,
+		"SELECT t.slug, COALESCE(t.title,''), t.level, t.position, COALESCE(s.body,'') "+
+			"FROM `"+sectionTable+"` s JOIN `"+typeTable+"` t ON t.slug = s.section_type_slug "+
+			"WHERE s."+ownerCol+"=? ORDER BY t.position, t.slug", ownerID)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var out []SectionRow
+	for rows.Next() {
+		var r SectionRow
+		if err := rows.Scan(&r.Key, &r.Title, &r.Level, &r.Position, &r.Body); err != nil {
+			return nil, err
+		}
+		out = append(out, r)
+	}
+	return out, rows.Err()
+}
+
+// ListSpecSections / ListEntitySections return an owner's prose sections joined to their
+// type, in canonical render order (SectionType.position).
+func ListSpecSections(ctx context.Context, x Execer, specID string) ([]SectionRow, error) {
+	return listSections(ctx, x, "req_spec_section", "req_spec_section_type", "spec_id", specID)
+}
+func ListEntitySections(ctx context.Context, x Execer, entityID string) ([]SectionRow, error) {
+	return listSections(ctx, x, "ent_entity_section", "ent_entity_section_type", "entity_id", entityID)
+}
+
+// SpecIDByPrefix resolves a spec's id by its FR prefix (ok=false if absent).
+func SpecIDByPrefix(ctx context.Context, x Execer, prefix string) (string, bool, error) {
+	var id string
+	err := x.QueryRowContext(ctx, "SELECT id FROM `req_spec` WHERE prefix=?", prefix).Scan(&id)
+	if err == sql.ErrNoRows {
+		return "", false, nil
+	}
+	return id, err == nil, err
+}
+
+// EntityIDByName resolves an entity's id by its (unique) name (ok=false if absent).
+func EntityIDByName(ctx context.Context, x Execer, name string) (string, bool, error) {
+	var id string
+	err := x.QueryRowContext(ctx, "SELECT id FROM `ent_entity` WHERE name=?", name).Scan(&id)
+	if err == sql.ErrNoRows {
+		return "", false, nil
+	}
+	return id, err == nil, err
 }
 
 // ListKeyEntities returns the names of entities a spec links to via spec→entity refs.
@@ -258,7 +393,7 @@ func ListKeyEntities(ctx context.Context, x Execer, specID string) ([]string, er
 // have no page yet, so DocPath is empty and they render label-only.
 type RefTargetRow struct {
 	Type    string // domain|spec|requirement|entity|milestone
-	Key     string // the [[TYPE:key]] key: abbreviation | prefix-or-path | fr_key | name
+	Key     string // the [[TYPE:key]] key: slug | prefix-or-path | fr_key | name
 	ID      string
 	DocPath string // generated page path; requirement = owning spec's path; "" when none
 	Anchor  string // in-page anchor (requirement = fr-key slug); "" otherwise
@@ -269,15 +404,18 @@ type RefTargetRow struct {
 // `[[SPEC:scheduling/events/take-attendance.md]]` both resolve.
 func ListRefTargets(ctx context.Context, x Execer) ([]RefTargetRow, error) {
 	var out []RefTargetRow
+	// fullPath reconstructs a spec's full docs path from its domain-relative path
+	// (req_spec.path is stored without the leading domain segment; migration 0017).
+	const fullPath = "CONCAT(d.slug,'/',s.path)"
 	queries := []string{
-		"SELECT 'domain', abbreviation, id, '', '' FROM `req_domain`",
-		"SELECT 'spec', prefix, id, path, '' FROM `req_spec` WHERE prefix IS NOT NULL AND prefix<>''",
-		"SELECT 'spec', path, id, path, '' FROM `req_spec`",
-		"SELECT 'requirement', r.fr_key, r.id, COALESCE(s.path,''), LOWER(r.fr_key) " +
-			"FROM `req_requirement` r JOIN `req_spec` s ON r.spec_id = s.id WHERE r.fr_key IS NOT NULL AND r.fr_key<>''",
-		"SELECT 'entity', e.name, e.id, COALESCE(s.path,''), '' " +
-			"FROM `ent_entity` e LEFT JOIN `req_spec` s ON e.spec_id = s.id",
-		"SELECT 'milestone', abbreviation, id, '', '' FROM `plan_milestone`",
+		"SELECT 'domain', slug, id, '', '' FROM `req_domain`",
+		"SELECT 'spec', s.prefix, s.id, " + fullPath + ", '' FROM `req_spec` s JOIN `req_domain` d ON s.domain_id=d.id WHERE s.prefix IS NOT NULL AND s.prefix<>''",
+		"SELECT 'spec', " + fullPath + ", s.id, " + fullPath + ", '' FROM `req_spec` s JOIN `req_domain` d ON s.domain_id=d.id",
+		"SELECT 'requirement', r.fr_key, r.id, COALESCE(" + fullPath + ",''), LOWER(r.fr_key) " +
+			"FROM `req_requirement` r JOIN `req_spec` s ON r.spec_id = s.id JOIN `req_domain` d ON s.domain_id=d.id WHERE r.fr_key IS NOT NULL AND r.fr_key<>''",
+		"SELECT 'entity', e.name, e.id, COALESCE(" + fullPath + ",''), '' " +
+			"FROM `ent_entity` e LEFT JOIN `req_spec` s ON e.spec_id = s.id LEFT JOIN `req_domain` d ON s.domain_id=d.id",
+		"SELECT 'milestone', slug, id, '', '' FROM `plan_milestone`",
 		// Glossary terms resolve by slug and by alias; both link to glossary.md#slug.
 		"SELECT 'glossary_term', slug, id, 'glossary.md', slug FROM `req_glossary_term`",
 		"SELECT 'glossary_term', a.alias, t.id, 'glossary.md', t.slug " +
@@ -320,7 +458,8 @@ type DeliveryStatusRow struct {
 	RequiresMilestone  bool
 }
 
-const deliveryStatusCols = "`key`, COALESCE(label,''), COALESCE(description,''), sequence, " +
+// DeliveryStatusRow.Key maps to the `slug` column (named slug, not the reserved word key; migration 0014).
+const deliveryStatusCols = "slug, COALESCE(label,''), COALESCE(description,''), sequence, " +
 	"counts_as_covered, requires_e2e_test, requires_shared_test, requires_milestone"
 
 func scanDeliveryStatus(s interface{ Scan(...any) error }, d *DeliveryStatusRow) error {
@@ -331,7 +470,7 @@ func scanDeliveryStatus(s interface{ Scan(...any) error }, d *DeliveryStatusRow)
 // ListDeliveryStatuses returns the delivery_status lookup rows in sequence order.
 func ListDeliveryStatuses(ctx context.Context, x Execer) ([]DeliveryStatusRow, error) {
 	rows, err := x.QueryContext(ctx,
-		"SELECT "+deliveryStatusCols+" FROM `plan_delivery_status` ORDER BY sequence, `key`")
+		"SELECT "+deliveryStatusCols+" FROM `plan_delivery_status` ORDER BY sequence, slug")
 	if err != nil {
 		return nil, err
 	}
@@ -351,7 +490,7 @@ func ListDeliveryStatuses(ctx context.Context, x Execer) ([]DeliveryStatusRow, e
 func DeliveryStatusByKey(ctx context.Context, x Execer, key string) (DeliveryStatusRow, bool, error) {
 	var d DeliveryStatusRow
 	err := scanDeliveryStatus(
-		x.QueryRowContext(ctx, "SELECT "+deliveryStatusCols+" FROM `plan_delivery_status` WHERE `key`=?", key), &d)
+		x.QueryRowContext(ctx, "SELECT "+deliveryStatusCols+" FROM `plan_delivery_status` WHERE slug=?", key), &d)
 	if err == sql.ErrNoRows {
 		return DeliveryStatusRow{}, false, nil
 	}
