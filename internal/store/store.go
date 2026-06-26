@@ -199,7 +199,7 @@ func ListRequirements(ctx context.Context, x Execer, specPrefix string) ([]Requi
 		return nil, err
 	}
 	rows, err := x.QueryContext(ctx,
-		"SELECT id,spec_id,number,COALESCE(suffix,''),fr_key,statement,content_status,COALESCE(delivery_status,''),COALESCE(milestone_id,'') FROM `req_requirement` WHERE spec_id=? ORDER BY number",
+		"SELECT id,spec_id,number,COALESCE(suffix,''),fr_key,COALESCE(statement,''),content_status,COALESCE(delivery_status,''),COALESCE(milestone_id,'') FROM `req_requirement` WHERE spec_id=? ORDER BY number",
 		specID)
 	if err != nil {
 		return nil, err

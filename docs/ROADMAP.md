@@ -49,8 +49,12 @@ What's built and what's next. A living document — pairs with [ARCHITECTURE.md]
   endpoint types a given kind may link) — left generic for now.
 - **`--dry-run` flag** — `Mutate` already supports it; expose it on the CLI.
 - **Structured errors → exit codes** + a `--json` error envelope.
-- **Broaden CRUD** — `edit`/`delete`/`show` for existing entities, then the remaining entities
-  (Milestone, Test*, Capability, Deliverable, View, Entity*, ExternalRef).
+- **Broaden CRUD** — **`req` + `spec` `show`/`edit`/`delete` DONE.** `edit` re-runs the shared
+  canonicalize→validate→reconcile-refs layer (req statement); `delete` removes the row and every
+  polymorphic reference touching it (`store.DeleteNodeRefs` over entity_refs/edges/external_refs) —
+  spec delete also relies on the FK cascade for child requirements/sections/stories and cleans each
+  child's refs. **Remaining:** `domain`/`term`/`edge`/`section`/`entity` show/edit/delete, then the
+  not-yet-CRUD'd entities (Milestone, Test*, Capability, Deliverable, View, ExternalRef).
 - **`asdf config get/set`** — `internal/config`/`configfile` are lifted but have no CLI yet.
 - **Reads honor the active changeset — DONE.** `ls`/`show` reads (and the `Mutate` validation hook's
   existence/ref checks) now run on the resolved target branch (`--changeset` → active changeset →
