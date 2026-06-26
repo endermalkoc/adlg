@@ -4,6 +4,7 @@ import (
 	"context"
 	"database/sql"
 	"fmt"
+	"strings"
 	"time"
 )
 
@@ -161,6 +162,146 @@ func DeleteSpec(ctx context.Context, x Execer, key string) (SpecRow, bool, error
 		return SpecRow{}, false, fmt.Errorf("delete spec %s: %w", key, err)
 	}
 	return sp, true, nil
+}
+
+// ---- integrity check sources ----------------------------------------------
+
+// ProseField is one stored text value plus a human label for where it lives, so `check`
+// can point at a dangling reference's location.
+type ProseField struct {
+	Location string `json:"location"`
+	Text     string `json:"-"`
+}
+
+// specLabelExpr is the spec's prefix, else its domain/slug — a readable spec id for a
+// check finding's location.
+const specLabelExpr = "COALESCE(NULLIF(s.prefix,''), CONCAT(d.slug,'/',COALESCE(s.slug,'')))"
+
+// ListProseFields returns every stored text field that can carry inline [[TYPE:key]]
+// references, each labeled by its owning entity — the whole corpus `check` scans for
+// dangling refs. Covers requirement statements/notes, spec & entity section bodies,
+// requirement-group notes, user-story fields, acceptance-scenario steps, and glossary
+// definitions.
+func ListProseFields(ctx context.Context, x Execer) ([]ProseField, error) {
+	var out []ProseField
+	add := func(loc, text string) {
+		if strings.TrimSpace(text) != "" {
+			out = append(out, ProseField{Location: loc, Text: text})
+		}
+	}
+	if err := eachRow(ctx, x, "SELECT fr_key, COALESCE(statement,''), COALESCE(notes,'') FROM `req_requirement`",
+		func(sc scanRow) error {
+			var fk, stmt, notes string
+			if err := sc(&fk, &stmt, &notes); err != nil {
+				return err
+			}
+			add("requirement "+fk, stmt)
+			add("requirement "+fk+" (notes)", notes)
+			return nil
+		}); err != nil {
+		return nil, err
+	}
+
+	if err := eachRow(ctx, x, "SELECT "+specLabelExpr+", ss.section_type_slug, COALESCE(ss.body,'') FROM `req_spec_section` ss JOIN `req_spec` s ON ss.spec_id=s.id JOIN `req_domain` d ON s.domain_id=d.id",
+		func(sc scanRow) error {
+			var spec, slug, body string
+			if err := sc(&spec, &slug, &body); err != nil {
+				return err
+			}
+			add("spec "+spec+" §"+slug, body)
+			return nil
+		}); err != nil {
+		return nil, err
+	}
+
+	if err := eachRow(ctx, x, "SELECT e.name, es.section_type_slug, COALESCE(es.body,'') FROM `ent_entity_section` es JOIN `ent_entity` e ON es.entity_id=e.id",
+		func(sc scanRow) error {
+			var name, slug, body string
+			if err := sc(&name, &slug, &body); err != nil {
+				return err
+			}
+			add("entity "+name+" §"+slug, body)
+			return nil
+		}); err != nil {
+		return nil, err
+	}
+
+	if err := eachRow(ctx, x, "SELECT "+specLabelExpr+", COALESCE(g.notes,'') FROM `req_requirement_group` g JOIN `req_spec` s ON g.spec_id=s.id JOIN `req_domain` d ON s.domain_id=d.id",
+		func(sc scanRow) error {
+			var spec, notes string
+			if err := sc(&spec, &notes); err != nil {
+				return err
+			}
+			add("spec "+spec+" (group notes)", notes)
+			return nil
+		}); err != nil {
+		return nil, err
+	}
+
+	if err := eachRow(ctx, x, "SELECT "+specLabelExpr+", us.position, COALESCE(us.narrative,''),COALESCE(us.as_a,''),COALESCE(us.i_want,''),COALESCE(us.so_that,''),COALESCE(us.why_priority,''),COALESCE(us.independent_test,'') FROM `req_user_story` us JOIN `req_spec` s ON us.spec_id=s.id JOIN `req_domain` d ON s.domain_id=d.id",
+		func(sc scanRow) error {
+			var spec string
+			var pos int
+			var narrative, asA, iWant, soThat, why, indep string
+			if err := sc(&spec, &pos, &narrative, &asA, &iWant, &soThat, &why, &indep); err != nil {
+				return err
+			}
+			loc := fmt.Sprintf("story %s#%d", spec, pos)
+			for _, t := range []string{narrative, asA, iWant, soThat, why, indep} {
+				add(loc, t)
+			}
+			return nil
+		}); err != nil {
+		return nil, err
+	}
+
+	if err := eachRow(ctx, x, "SELECT "+specLabelExpr+", sc.position, COALESCE(sc.`given`,''),COALESCE(sc.`when`,''),COALESCE(sc.`then`,'') FROM `req_acceptance_scenario` sc JOIN `req_user_story` us ON sc.user_story_id=us.id JOIN `req_spec` s ON us.spec_id=s.id JOIN `req_domain` d ON s.domain_id=d.id",
+		func(scan scanRow) error {
+			var spec string
+			var pos int
+			var given, when, then string
+			if err := scan(&spec, &pos, &given, &when, &then); err != nil {
+				return err
+			}
+			loc := fmt.Sprintf("scenario %s#%d", spec, pos)
+			add(loc, given)
+			add(loc, when)
+			add(loc, then)
+			return nil
+		}); err != nil {
+		return nil, err
+	}
+
+	if err := eachRow(ctx, x, "SELECT slug, COALESCE(definition,'') FROM `req_glossary_term`",
+		func(sc scanRow) error {
+			var slug, def string
+			if err := sc(&slug, &def); err != nil {
+				return err
+			}
+			add("term "+slug, def)
+			return nil
+		}); err != nil {
+		return nil, err
+	}
+	return out, nil
+}
+
+// scanRow is rows.Scan — a callback fed to eachRow.
+type scanRow func(dest ...any) error
+
+// eachRow runs a query and invokes fn(rows.Scan) for each row.
+func eachRow(ctx context.Context, x Execer, query string, fn func(scanRow) error, args ...any) error {
+	rows, err := x.QueryContext(ctx, query, args...)
+	if err != nil {
+		return err
+	}
+	defer rows.Close()
+	for rows.Next() {
+		if err := fn(rows.Scan); err != nil {
+			return err
+		}
+	}
+	return rows.Err()
 }
 
 // childIDs runs a single-column id query and collects the ids.
