@@ -324,6 +324,78 @@ a.meta-chip:hover { border-color: var(--accent); color: var(--accent); }
 .content-tree > ul > li > .nav-group > summary > .tree-link,
 .content-tree > ul > li > .nav-group > summary > .nav-dir { font-weight: 700; font-size: 1.05rem; }
 
+/* ---- planning pages (pills, capability tree, cards) ----------------------- */
+.doc h2 > .icon { width: 0.95em; height: 0.95em; margin-right: 0.4rem; vertical-align: -0.1em; color: var(--fg-muted); }
+
+.pill {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.25rem;
+  padding: 0.05rem 0.5rem;
+  border-radius: 999px;
+  border: 1px solid transparent;
+  font-size: 0.72rem;
+  font-weight: 600;
+  line-height: 1.5;
+  white-space: nowrap;
+  vertical-align: 0.08em;
+}
+.pill .icon { width: 0.85em; height: 0.85em; }
+.pill-level { text-transform: capitalize; }
+.pill-level-domain     { background: #fbefff; color: #8250df; border-color: #ecd6ff; }
+.pill-level-epic       { background: #ddf4ff; color: #0969da; border-color: #b6e3ff; }
+.pill-level-capability { background: #eef1f4; color: #59636e; border-color: #d1d9e0; }
+.pill-ms   { background: #fff8c5; color: #7d4e00; border-color: #f5e6a8; }
+.pill-size { background: #eef1f4; color: #59636e; border-color: #d1d9e0; }
+.pill-status-proposed { background: #eef1f4; color: #59636e; border-color: #d1d9e0; }
+.pill-status-specced  { background: #ddf4ff; color: #0969da; border-color: #b6e3ff; }
+.pill-status-wired    { background: #fff1e5; color: #bc4c00; border-color: #ffd8b5; }
+.pill-status-built    { background: #dafbe1; color: #1a7f37; border-color: #aceebb; }
+.pill-status-ship     { background: #1a7f37; color: #ffffff; border-color: #1a7f37; }
+.pill-ai-yes { background: #dafbe1; color: #1a7f37; border-color: #aceebb; }
+.pill-ai-no  { background: #ffebe9; color: #cf222e; border-color: #ffcecb; }
+.pill-ai-na  { background: #f6f8fa; color: #8c959f; border-color: #e4e8ec; }
+.pill-count  { background: var(--bg-sidebar); color: var(--fg-muted); border-color: var(--border-muted); font-weight: 500; }
+
+/* capability hierarchy */
+.cap-tree, .cap-tree ul { list-style: none; margin: 0; padding: 0; }
+.cap-tree ul { margin-left: 0.85rem; padding-left: 0.85rem; border-left: 1px solid var(--border-muted); }
+.cap-tree li { margin: 0.3rem 0; }
+.cap-node { display: flex; align-items: center; gap: 0.4rem; flex-wrap: wrap; }
+.cap-node > .icon { color: var(--fg-muted); }
+.cap-title { font-weight: 600; }
+
+/* deliverable / view item lists */
+.plan-list { list-style: none; margin: 0.5rem 0; padding: 0; }
+.plan-item { padding: 0.6rem 0.85rem; margin: 0.5rem 0; border: 1px solid var(--border-muted); border-radius: var(--radius); background: #fbfcfd; }
+.plan-item-head { display: flex; align-items: center; gap: 0.4rem; flex-wrap: wrap; }
+.plan-item-head > .icon { color: var(--fg-muted); }
+.plan-title { font-weight: 600; }
+.plan-item-sub { margin-top: 0.3rem; color: var(--fg-muted); }
+.plan-item-rels { display: flex; flex-wrap: wrap; gap: 0.4rem 1.25rem; margin-top: 0.45rem; font-size: 0.85rem; color: var(--fg-muted); }
+.rel-group { display: inline-flex; align-items: flex-start; gap: 0.3rem; max-width: 100%; }
+.rel-group > .icon { width: 0.95em; height: 0.95em; margin-top: 0.2em; flex: 0 0 auto; }
+.rel-label { font-weight: 600; color: var(--fg); }
+
+/* planning index cards */
+.plan-cards { display: flex; flex-wrap: wrap; gap: 1rem; margin: 1.5rem 0; }
+.plan-card {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 0.2rem;
+  min-width: 9.5rem;
+  padding: 1.25rem 1.5rem;
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  background: var(--bg-sidebar);
+  color: var(--fg);
+}
+.plan-card:hover { border-color: var(--accent); text-decoration: none; }
+.plan-card-icon .icon { width: 1.8rem; height: 1.8rem; color: var(--accent); }
+.plan-card-n { font-size: 1.6rem; font-weight: 700; }
+.plan-card-label { color: var(--fg-muted); font-size: 0.9rem; }
+
 /* ---- responsive / CSS-only nav toggle ------------------------------------- */
 .nav-toggle { display: none; }
 .nav-toggle-btn {

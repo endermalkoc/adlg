@@ -39,7 +39,22 @@ func (jsonRenderer) Render(m *Model) ([]File, error) {
 		}
 		files = append(files, File{Path: "glossary.json", Content: c, Kind: "glossary"})
 	}
+	if len(m.Capabilities) > 0 || len(m.Deliverables) > 0 || len(m.Views) > 0 {
+		c, err := toJSON(planningDoc{Capabilities: m.Capabilities, Deliverables: m.Deliverables, Views: m.Views})
+		if err != nil {
+			return nil, err
+		}
+		files = append(files, File{Path: "planning.json", Content: c, Kind: "planning"})
+	}
 	return files, nil
+}
+
+// planningDoc is the planning.json record: the whole planning layer in one file (the layer is
+// relational, not per-document, so it serializes as a single roll-up alongside index.json).
+type planningDoc struct {
+	Capabilities []*Capability  `json:"capabilities,omitempty"`
+	Deliverables []*Deliverable `json:"deliverables,omitempty"`
+	Views        []*View        `json:"views,omitempty"`
 }
 
 // Manifest is the root index.json: a discovery listing of every document and where to
@@ -49,6 +64,7 @@ type Manifest struct {
 	Specs    []ManifestRef `json:"specs"`
 	Entities []ManifestRef `json:"entities"`
 	Glossary bool          `json:"glossary"`
+	Planning bool          `json:"planning"` // planning.json present (capabilities/deliverables/views)
 }
 
 // ManifestRef is a lightweight pointer to a document's JSON file.
@@ -60,7 +76,11 @@ type ManifestRef struct {
 }
 
 func buildManifest(m *Model) Manifest {
-	man := Manifest{Domains: m.Domains, Glossary: len(m.Terms) > 0}
+	man := Manifest{
+		Domains:  m.Domains,
+		Glossary: len(m.Terms) > 0,
+		Planning: len(m.Capabilities) > 0 || len(m.Deliverables) > 0 || len(m.Views) > 0,
+	}
 	for _, sp := range m.Specs {
 		key := sp.Prefix
 		if key == "" {

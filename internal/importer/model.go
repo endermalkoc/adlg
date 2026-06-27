@@ -21,6 +21,59 @@ type Graph struct {
 	Milestones    []Milestone          `json:"milestones"`
 	Entities      []Entity             `json:"entities"`
 	Relationships []EntityRelationship `json:"entity_relationships,omitempty"`
+
+	// Planning layer (populated by e.g. internal/importer/notion).
+	Capabilities []Capability  `json:"capabilities,omitempty"`
+	Deliverables []Deliverable `json:"deliverables,omitempty"`
+	Views        []View        `json:"views,omitempty"`
+}
+
+// ---- planning layer --------------------------------------------------------
+//
+// Planning rows (Capability → Deliverable → View) come from an external task
+// system (e.g. Notion). They carry no natural unique business column, so each
+// records its source system's stable id (SourceID, e.g. a Notion page id);
+// the apply pass derives a deterministic row id from it, so re-import converges
+// instead of duplicating. Relations are kept as lists of source ids and resolved
+// to row ids (and reconciled per owner) at apply time.
+
+// Capability ← a row of the planning "capabilities" set (a 3-tier hierarchy via
+// Level / ParentSourceID).
+type Capability struct {
+	SourceID             string   `json:"source_id"`
+	SourceURL            string   `json:"source_url,omitempty"`
+	Title                string   `json:"title"`
+	Level                string   `json:"level,omitempty"` // domain|epic|capability
+	DomainSlug           string   `json:"domain_slug"`
+	ParentSourceID       string   `json:"parent_source_id,omitempty"`
+	MilestoneSlugs       []string `json:"milestone_slugs,omitempty"`        // → capability_milestone
+	DeliverableSourceIDs []string `json:"deliverable_source_ids,omitempty"` // → capability_deliverable
+}
+
+// Deliverable ← a row of the planning "deliverables" set (the external-task subject).
+type Deliverable struct {
+	SourceID            string   `json:"source_id"`
+	SourceURL           string   `json:"source_url,omitempty"`
+	Title               string   `json:"title"`
+	Size                string   `json:"size,omitempty"`     // S|M|L|XL
+	Status              string   `json:"status,omitempty"`   // proposed|specced|wired|built|ship
+	AIReady             string   `json:"ai_ready,omitempty"` // yes|no|na
+	MilestoneSlug       string   `json:"milestone_slug,omitempty"`
+	CapabilitySourceIDs []string `json:"capability_source_ids,omitempty"` // → capability_deliverable
+	ViewSourceIDs       []string `json:"view_source_ids,omitempty"`       // → deliverable_view
+	BlockedBySourceIDs  []string `json:"blocked_by_source_ids,omitempty"` // → deliverable_dependency
+	BeadIDs             string   `json:"bead_ids,omitempty"`              // raw → ExternalRef(system=beads)
+}
+
+// View ← a row of the planning "views" set (a UI surface; the bridge into specs).
+type View struct {
+	SourceID             string   `json:"source_id"`
+	SourceURL            string   `json:"source_url,omitempty"`
+	Title                string   `json:"title"`
+	Route                string   `json:"route,omitempty"`
+	DomainSlug           string   `json:"domain_slug"`
+	SpecFile             string   `json:"spec_file,omitempty"`              // best-effort → view.spec_id
+	DeliverableSourceIDs []string `json:"deliverable_source_ids,omitempty"` // → deliverable_view
 }
 
 // EntityRelationship ← a foreign-key / junction relationship extracted from the

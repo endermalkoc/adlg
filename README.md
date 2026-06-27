@@ -241,7 +241,7 @@ Inspired by — and building on the Dolt infrastructure of — [beads](https://g
 
 - [docs/entities/](docs/entities/index.md) — the data model
 - [ARCHITECTURE.md](docs/ARCHITECTURE.md) — architecture & principles
-- [CHANGELOG.md](CHANGELOG.md) — what's already built
+- [docs/CHANGELOG.md](docs/CHANGELOG.md) — what's already built
 - [ROADMAP.md](docs/ROADMAP.md) — what's next
 - [docs/codebase-map.md](docs/codebase-map.md) — folder map + fresh-session orientation
 - [docs/build-and-release.md](docs/build-and-release.md) — build, versioning, release, install, `.gitignore` policy

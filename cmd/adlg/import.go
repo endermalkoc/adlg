@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"os"
 	"sort"
 	"strings"
 
@@ -11,12 +12,19 @@ import (
 
 	"github.com/endermalkoc/adlg/internal/app"
 	"github.com/endermalkoc/adlg/internal/importer"
+	"github.com/endermalkoc/adlg/internal/importer/notion"
 	"github.com/endermalkoc/adlg/internal/importer/tutor"
 )
 
 var (
 	importApply   bool
 	importDrizzle string
+
+	notionToken   string
+	notionFrom    string
+	notionCapDB   string
+	notionDelivDB string
+	notionViewsDB string
 )
 
 var importCmd = &cobra.Command{
@@ -85,21 +93,139 @@ var importTutorCmd = &cobra.Command{
 			emit(stats, "")
 			return nil
 		}
-		printApplyStats(stats)
+		printApplyStats("imported tutor corpus", tutorKinds, stats)
 		return nil
 	},
 }
 
-func printApplyStats(s *importer.ApplyStats) {
+var tutorKinds = []string{"domains", "milestones", "specs", "requirement_groups", "requirements", "user_stories", "acceptance_scenarios", "entity_refs", "external_refs", "entities", "entity_relationships", "sections"}
+
+var planningKinds = []string{"domains", "milestones", "capabilities", "deliverables", "views", "capability_milestone", "capability_deliverable", "deliverable_view", "deliverable_dependency", "external_refs"}
+
+func printApplyStats(title string, kinds []string, s *importer.ApplyStats) {
 	var b strings.Builder
-	fmt.Fprintf(&b, "imported tutor corpus\n")
-	kinds := []string{"domains", "milestones", "specs", "requirement_groups", "requirements", "user_stories", "acceptance_scenarios", "entity_refs", "external_refs", "entities", "entity_relationships", "sections"}
-	fmt.Fprintf(&b, "  %-22s %8s %8s %8s\n", "", "inserted", "updated", "skipped")
+	fmt.Fprintf(&b, "%s\n", title)
+	fmt.Fprintf(&b, "  %-24s %8s %8s %8s\n", "", "inserted", "updated", "skipped")
 	for _, k := range kinds {
 		if s.Inserted[k] == 0 && s.Updated[k] == 0 && s.Skipped[k] == 0 {
 			continue
 		}
-		fmt.Fprintf(&b, "  %-22s %8d %8d %8d\n", k, s.Inserted[k], s.Updated[k], s.Skipped[k])
+		fmt.Fprintf(&b, "  %-24s %8d %8d %8d\n", k, s.Inserted[k], s.Updated[k], s.Skipped[k])
+	}
+	fmt.Print(b.String())
+}
+
+var importNotionCmd = &cobra.Command{
+	Use:   "notion",
+	Short: "Import a Notion planning workspace (capabilities, deliverables, views)",
+	Long: "Import the Notion planning databases (Capabilities / Deliverables / Views) into\n" +
+		"ADLG's planning layer. By default this is a read-only parse-and-report; --apply\n" +
+		"writes the staged graph through the command contract (one transaction, one Dolt\n" +
+		"commit), idempotent on re-run.\n\n" +
+		"Source: the Notion API (--token, or $NOTION_API_KEY / $ADLG_NOTION_TOKEN), or saved\n" +
+		"query responses with --from <dir> (capabilities.json / deliverables.json / views.json).",
+	Args: cobra.NoArgs,
+	RunE: func(cmd *cobra.Command, _ []string) error {
+		ctx := cmd.Context()
+
+		var (
+			g   *importer.Graph
+			rep *importer.Report
+			err error
+		)
+		if notionFrom != "" {
+			g, rep, err = notion.ParseDir(notionFrom)
+		} else {
+			token := notionToken
+			if token == "" {
+				token = envFirst("ADLG_NOTION_TOKEN", "NOTION_API_KEY")
+			}
+			g, rep, err = notion.Parse(ctx, notion.Config{
+				Token:          token,
+				CapabilitiesDB: notionCapDB,
+				DeliverablesDB: notionDelivDB,
+				ViewsDB:        notionViewsDB,
+			})
+		}
+		if err != nil {
+			return err
+		}
+
+		if !importApply {
+			if flagJSON {
+				out := struct {
+					Graph  *importer.Graph  `json:"graph"`
+					Report *importer.Report `json:"report"`
+				}{g, rep}
+				b, _ := json.MarshalIndent(out, "", "  ")
+				fmt.Println(string(b))
+				return nil
+			}
+			printNotionReport(g, rep)
+			return nil
+		}
+
+		ws, err := connect(ctx)
+		if err != nil {
+			return err
+		}
+		defer ws.Close()
+		var stats *importer.ApplyStats
+		err = runMutate(cmd, ws, app.MutateOpts{
+			Summary: fmt.Sprintf("import Notion planning (%d capabilities, %d deliverables, %d views)",
+				rep.Counts["capabilities"], rep.Counts["deliverables"], rep.Counts["views"]),
+		}, func(ctx context.Context, w *app.Write) error {
+			s, e := importer.Apply(ctx, w.Tx, g)
+			if e != nil {
+				return e
+			}
+			stats = s
+			for _, t := range importer.TouchedTables {
+				w.MarkDirty(t)
+			}
+			return nil
+		})
+		if err != nil {
+			return err
+		}
+		if flagJSON {
+			emit(stats, "")
+			return nil
+		}
+		printApplyStats("imported Notion planning workspace", planningKinds, stats)
+		return nil
+	},
+}
+
+func printNotionReport(g *importer.Graph, rep *importer.Report) {
+	var b strings.Builder
+	fmt.Fprintf(&b, "Notion planning workspace\n\nparsed entities\n")
+	for _, k := range []string{"domains", "milestones", "capabilities", "deliverables", "views"} {
+		fmt.Fprintf(&b, "  %-14s %d\n", k, rep.Counts[k])
+	}
+	order := map[string]int{importer.SevGap: 0, importer.SevWarn: 1, importer.SevInfo: 2}
+	label := map[string]string{importer.SevGap: "ER GAPS", importer.SevWarn: "WARNINGS", importer.SevInfo: "notes"}
+	findings := append([]importer.Finding(nil), rep.Findings...)
+	sort.SliceStable(findings, func(i, j int) bool {
+		if order[findings[i].Severity] != order[findings[j].Severity] {
+			return order[findings[i].Severity] < order[findings[j].Severity]
+		}
+		return findings[i].Category < findings[j].Category
+	})
+	lastSev := ""
+	for _, f := range findings {
+		if f.Severity != lastSev {
+			fmt.Fprintf(&b, "\n%s\n", label[f.Severity])
+			lastSev = f.Severity
+		}
+		ref := ""
+		if f.Ref != "" {
+			ref = "  (" + f.Ref + ")"
+		}
+		fmt.Fprintf(&b, "  [%s] %s%s\n", f.Category, f.Message, ref)
+	}
+	if len(findings) == 0 {
+		fmt.Fprintf(&b, "\nno findings\n")
 	}
 	fmt.Print(b.String())
 }
@@ -155,11 +281,31 @@ func printTutorReport(path string, g *importer.Graph, rep *importer.Report) {
 	fmt.Print(b.String())
 }
 
+// envFirst returns the value of the first set (non-empty) environment variable.
+func envFirst(keys ...string) string {
+	for _, k := range keys {
+		if v := strings.TrimSpace(os.Getenv(k)); v != "" {
+			return v
+		}
+	}
+	return ""
+}
+
 func init() {
 	importTutorCmd.Flags().StringVar(&importDrizzle, "drizzle", "",
 		"path to the tutor Drizzle schema dir for entity relationships (default: auto-detect at <docs>/../src/packages/database/src/schema)")
 	importTutorCmd.Flags().BoolVar(&importApply, "apply", false,
 		"write the parsed graph into the database via the command contract (default: read-only report)")
 	importCmd.AddCommand(importTutorCmd)
+
+	importNotionCmd.Flags().StringVar(&notionToken, "token", "", "Notion integration token (default: $ADLG_NOTION_TOKEN, then $NOTION_API_KEY)")
+	importNotionCmd.Flags().StringVar(&notionFrom, "from", "", "import from saved query responses in this dir (capabilities.json/deliverables.json/views.json) instead of the API")
+	importNotionCmd.Flags().StringVar(&notionCapDB, "capabilities-db", "", "override the Capabilities database id")
+	importNotionCmd.Flags().StringVar(&notionDelivDB, "deliverables-db", "", "override the Deliverables database id")
+	importNotionCmd.Flags().StringVar(&notionViewsDB, "views-db", "", "override the Views database id")
+	importNotionCmd.Flags().BoolVar(&importApply, "apply", false,
+		"write the parsed graph into the database via the command contract (default: read-only report)")
+	importCmd.AddCommand(importNotionCmd)
+
 	rootCmd.AddCommand(importCmd)
 }

@@ -14,6 +14,7 @@ cross-platform releases.
 | File | Purpose |
 |---|---|
 | [cmd/adlg/version.go](../cmd/adlg/version.go) | `adlg version` (+ `--version`, `--json`). Version/commit/date are injected at build time; falls back to embedded VCS build info for `go install` builds. |
+| [cmd/adlg/upgrade.go](../cmd/adlg/upgrade.go) + [internal/selfupdate](../internal/selfupdate) | `adlg upgrade [version]` — self-update: download the release archive for this OS/arch, checksum-verify against `checksums.txt`, and replace the binary in place. `--check` reports availability only. Mirrors `install.sh`'s asset/checksum conventions. |
 | [.goreleaser.yaml](../.goreleaser.yaml) | Cross-builds linux/darwin/windows × amd64/arm64, archives (`tar.gz`, `zip` on Windows), `checksums.txt`, changelog. |
 | [.github/workflows/ci.yml](../.github/workflows/ci.yml) | On PR/push: `go vet` + `go build` + `go test`, plus a GoReleaser snapshot **dry-run** so release breakage is caught before tagging. |
 | [.github/workflows/release.yml](../.github/workflows/release.yml) | On a `v*` tag push: runs GoReleaser → publishes a GitHub Release. |
@@ -91,6 +92,23 @@ secrets to configure**. Tags like `v0.1.0-rc1` publish as pre-releases automatic
 The installer honors `ADLG_VERSION=v0.1.0` (pin a version) and `ADLG_INSTALL_DIR=~/.local/bin`
 (choose the location; defaults to `/usr/local/bin`, falling back to `~/.local/bin`). It verifies
 the SHA-256 checksum when `sha256sum`/`shasum` is available.
+
+## Updating (for consumers)
+
+Once `adlg` is installed it can update itself — no need to re-run the install script:
+
+```sh
+adlg upgrade          # download + install the latest release
+adlg upgrade --check  # just report whether a newer release exists
+adlg upgrade v0.1.0   # install a specific tag (pin / downgrade)
+```
+
+`upgrade` resolves the target tag (latest release, or the given one), downloads the
+`adlg_<version>_<os>_<arch>` archive, **verifies its SHA-256 against the release's
+`checksums.txt`** (always — not best-effort), and atomically replaces the running binary. It
+reads from the same release assets `install.sh` uses, so the two stay in lockstep. If the binary
+lives in a system path (e.g. `/usr/local/bin`), run `sudo adlg upgrade` so the replace can write
+there. `go install`-based installs update with `go install …@latest` instead.
 
 > **Binary name.** The binary is named `adlg`
 > PATH placement. The name is set by `project_name`/`binary:` in `.goreleaser.yaml` and `BINARY` in the

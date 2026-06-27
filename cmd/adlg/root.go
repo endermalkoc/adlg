@@ -30,6 +30,9 @@ var rootCmd = &cobra.Command{
 	Long: "ADLG (Agentic Delivery Lifecycle Graph) — a Dolt-backed store for a software\n" +
 		"project's domains, specs, requirements, tests, and plans, driven by humans and agents.",
 	SilenceUsage: true,
+	// Execute() is the sole error reporter (exit-code mapping + the --json error
+	// envelope); silence cobra's own print so errors aren't emitted twice.
+	SilenceErrors: true,
 }
 
 func init() {

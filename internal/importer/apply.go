@@ -6,6 +6,7 @@ import (
 	"strconv"
 	"strings"
 
+	"github.com/endermalkoc/adlg/internal/ids"
 	"github.com/endermalkoc/adlg/internal/store"
 )
 
@@ -15,6 +16,10 @@ var TouchedTables = []string{
 	"req_domain", "plan_milestone", "req_spec", "req_requirement", "req_requirement_group",
 	"req_user_story", "req_acceptance_scenario", "req_entity_ref", "pub_external_ref",
 	"ent_entity", "req_spec_section", "ent_entity_section", "ent_relationship",
+	// planning layer (Notion adapter)
+	"plan_capability", "plan_deliverable", "plan_view",
+	"plan_capability_milestone", "plan_capability_deliverable",
+	"plan_deliverable_view", "plan_deliverable_dependency",
 }
 
 // ApplyStats tallies the write, per entity kind.
@@ -322,7 +327,238 @@ func Apply(ctx context.Context, x store.Execer, g *Graph) (*ApplyStats, error) {
 		st.bump("external_refs", ins)
 	}
 
+	if err := applyPlanning(ctx, x, g, st, domainID, milestoneID); err != nil {
+		return st, err
+	}
+
 	return st, nil
+}
+
+// applyPlanning writes the planning layer (Capability/Deliverable/View + junctions
+// + deliverable external refs). Rows are keyed by an external source id (e.g. a Notion
+// page id); the row id is derived deterministically (ids.Rel) so re-import converges.
+// Junctions are reconciled per owner (clear-then-link), so a relation removed at the
+// source drops its row on re-import. domainID/milestoneID are the resolved id maps the
+// caller already built (the adapter seeds g.Domains/g.Milestones for every value it uses).
+func applyPlanning(ctx context.Context, x store.Execer, g *Graph, st *ApplyStats, domainID, milestoneID map[string]string) error {
+	if len(g.Capabilities) == 0 && len(g.Deliverables) == 0 && len(g.Views) == 0 {
+		return nil
+	}
+	capRowID := func(src string) string { return ids.Rel("plan_capability", src) }
+	delivRowID := func(src string) string { return ids.Rel("plan_deliverable", src) }
+	viewRowID := func(src string) string { return ids.Rel("plan_view", src) }
+
+	// *OK tracks which source rows were actually inserted, so a junction never
+	// references a row skipped for an unresolved domain (which would break an FK).
+	capOK := map[string]bool{}
+	delivOK := map[string]bool{}
+	viewOK := map[string]bool{}
+
+	for _, c := range g.Capabilities {
+		dID, ok := domainID[c.DomainSlug]
+		if !ok {
+			st.Skipped["capabilities"]++
+			continue
+		}
+		ins, err := store.UpsertCapability(ctx, x, store.Capability{
+			ID: capRowID(c.SourceID), Title: c.Title, Level: c.Level, DomainID: dID,
+		})
+		if err != nil {
+			return err
+		}
+		capOK[c.SourceID] = true
+		st.bump("capabilities", ins)
+		if c.SourceID != "" {
+			_, eins, err := store.UpsertExternalRef(ctx, x, "capability", capRowID(c.SourceID), "notion", c.SourceID, c.SourceURL)
+			if err != nil {
+				return err
+			}
+			st.bump("external_refs", eins)
+		}
+	}
+	for _, d := range g.Deliverables {
+		ins, err := store.UpsertDeliverable(ctx, x, store.Deliverable{
+			ID: delivRowID(d.SourceID), Title: d.Title, Size: d.Size, Status: d.Status,
+			AIReady: d.AIReady, MilestoneID: milestoneID[d.MilestoneSlug],
+		})
+		if err != nil {
+			return err
+		}
+		delivOK[d.SourceID] = true
+		st.bump("deliverables", ins)
+	}
+	for _, v := range g.Views {
+		dID, ok := domainID[v.DomainSlug]
+		if !ok {
+			st.Skipped["views"]++
+			continue
+		}
+		specID := ""
+		if v.SpecFile != "" {
+			sid, found, err := store.FindSpecIDBySlug(ctx, x, slugFromPath(v.SpecFile))
+			if err != nil {
+				return err
+			}
+			if found {
+				specID = sid
+			}
+		}
+		ins, err := store.UpsertView(ctx, x, store.View{
+			ID: viewRowID(v.SourceID), Title: v.Title, Route: v.Route, SpecID: specID, DomainID: dID,
+		})
+		if err != nil {
+			return err
+		}
+		viewOK[v.SourceID] = true
+		st.bump("views", ins)
+		if v.SourceID != "" {
+			_, eins, err := store.UpsertExternalRef(ctx, x, "view", viewRowID(v.SourceID), "notion", v.SourceID, v.SourceURL)
+			if err != nil {
+				return err
+			}
+			st.bump("external_refs", eins)
+		}
+	}
+
+	// Capability parents (every capability row now exists).
+	for _, c := range g.Capabilities {
+		if !capOK[c.SourceID] {
+			continue
+		}
+		parentID := ""
+		if capOK[c.ParentSourceID] {
+			parentID = capRowID(c.ParentSourceID)
+		}
+		if err := store.SetCapabilityParent(ctx, x, capRowID(c.SourceID), parentID); err != nil {
+			return err
+		}
+	}
+
+	// capability_milestone (owner = capability).
+	for _, c := range g.Capabilities {
+		if !capOK[c.SourceID] {
+			continue
+		}
+		cid := capRowID(c.SourceID)
+		if err := store.ClearCapabilityMilestones(ctx, x, cid); err != nil {
+			return err
+		}
+		for _, ms := range c.MilestoneSlugs {
+			if mid := milestoneID[ms]; mid != "" {
+				if err := store.LinkCapabilityMilestone(ctx, x, cid, mid); err != nil {
+					return err
+				}
+				st.Inserted["capability_milestone"]++
+			}
+		}
+	}
+
+	// capability_deliverable (union of both relation directions; owner = capability).
+	capDelivs := map[string]map[string]bool{}
+	addCD := func(capSrc, delivSrc string) {
+		if !capOK[capSrc] || !delivOK[delivSrc] {
+			return
+		}
+		if capDelivs[capSrc] == nil {
+			capDelivs[capSrc] = map[string]bool{}
+		}
+		capDelivs[capSrc][delivSrc] = true
+	}
+	for _, c := range g.Capabilities {
+		for _, ds := range c.DeliverableSourceIDs {
+			addCD(c.SourceID, ds)
+		}
+	}
+	for _, d := range g.Deliverables {
+		for _, cs := range d.CapabilitySourceIDs {
+			addCD(cs, d.SourceID)
+		}
+	}
+	for _, c := range g.Capabilities {
+		if !capOK[c.SourceID] {
+			continue
+		}
+		cid := capRowID(c.SourceID)
+		if err := store.ClearCapabilityDeliverables(ctx, x, cid); err != nil {
+			return err
+		}
+		for ds := range capDelivs[c.SourceID] {
+			if err := store.LinkCapabilityDeliverable(ctx, x, cid, delivRowID(ds)); err != nil {
+				return err
+			}
+			st.Inserted["capability_deliverable"]++
+		}
+	}
+
+	// deliverable_view (union of both relation directions; owner = deliverable).
+	delivViews := map[string]map[string]bool{}
+	addDV := func(delivSrc, viewSrc string) {
+		if !delivOK[delivSrc] || !viewOK[viewSrc] {
+			return
+		}
+		if delivViews[delivSrc] == nil {
+			delivViews[delivSrc] = map[string]bool{}
+		}
+		delivViews[delivSrc][viewSrc] = true
+	}
+	for _, d := range g.Deliverables {
+		for _, vs := range d.ViewSourceIDs {
+			addDV(d.SourceID, vs)
+		}
+	}
+	for _, v := range g.Views {
+		for _, ds := range v.DeliverableSourceIDs {
+			addDV(ds, v.SourceID)
+		}
+	}
+	for _, d := range g.Deliverables {
+		did := delivRowID(d.SourceID)
+		if err := store.ClearDeliverableViews(ctx, x, did); err != nil {
+			return err
+		}
+		for vs := range delivViews[d.SourceID] {
+			if err := store.LinkDeliverableView(ctx, x, did, viewRowID(vs)); err != nil {
+				return err
+			}
+			st.Inserted["deliverable_view"]++
+		}
+	}
+
+	// deliverable_dependency (owner = deliverable; "blocked by").
+	for _, d := range g.Deliverables {
+		did := delivRowID(d.SourceID)
+		if err := store.ClearDeliverableDependencies(ctx, x, did); err != nil {
+			return err
+		}
+		for _, bs := range d.BlockedBySourceIDs {
+			if delivOK[bs] {
+				if err := store.LinkDeliverableDependency(ctx, x, did, delivRowID(bs)); err != nil {
+					return err
+				}
+				st.Inserted["deliverable_dependency"]++
+			}
+		}
+	}
+
+	// External refs on deliverables: the Notion source (id + url) and any Bead IDs.
+	for _, d := range g.Deliverables {
+		did := delivRowID(d.SourceID)
+		if d.SourceID != "" {
+			_, ins, err := store.UpsertExternalRef(ctx, x, "deliverable", did, "notion", d.SourceID, d.SourceURL)
+			if err != nil {
+				return err
+			}
+			st.bump("external_refs", ins)
+		}
+		if bead := strings.TrimSpace(d.BeadIDs); bead != "" {
+			_, ins, err := store.UpsertExternalRef(ctx, x, "deliverable", did, "beads", bead, "")
+			if err != nil {
+				return err
+			}
+			st.bump("external_refs", ins)
+		}
+	}
+	return nil
 }
 
 // isIssueID reports whether a milestone value is actually a beads issue id

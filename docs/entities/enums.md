@@ -40,8 +40,8 @@ Each set is one of three **policy buckets** ([decisions.md](decisions.md)):
 | SpecSectionType.origin / EntitySectionType.origin | `builtin` (seed), `authored` (added later) |
 | SpecSectionType.slug | **table** (`req_spec_section_type` seed): `preamble`, `overview`, `edge_cases`, `more_info`, `success_criteria`, `assumptions`, `scope`, `open_questions`, `notes` |
 | EntitySectionType.slug | **table** (`ent_entity_section_type` seed): `preamble`, `purpose`, `key_concepts`, `schema_reference`, `relationships`, `business_rules`, `validations`, `access_control`, `notes`, `references` |
-| ExternalRef.subject_type | `deliverable`, `requirement`, `test_result` |
-| ExternalRef.system | `jira`, `rally`, `beads`, `linear`, `github`, `other` (open string) |
+| ExternalRef.subject_type | `deliverable`, `requirement`, `test_result`, `capability`, `view` |
+| ExternalRef.system | `jira`, `rally`, `beads`, `linear`, `github`, `notion`, `other` (open string) |
 | Actor.kind | `human`, `agent` |
 | Changeset.status | `draft`, `open`, `changes_requested`, `approved`, `denied`, `merged`, `closed` |
 | Review.verdict | `approve`, `deny`, `request_changes` |

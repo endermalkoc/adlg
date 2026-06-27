@@ -24,7 +24,7 @@ import (
 type File struct {
 	Path    string
 	Content string
-	Kind    string // "spec" | "entity" | "index" | "glossary"
+	Kind    string // "spec" | "entity" | "index" | "glossary" | "planning" | "asset"
 }
 
 // Renderer turns the assembled Model into a set of output files for one format.
@@ -54,10 +54,11 @@ type Stats struct {
 	Entities int    `json:"entities"`
 	Indexes  int    `json:"indexes"`
 	Glossary int    `json:"glossary"`
+	Planning int    `json:"planning"`
 }
 
 // Total returns the file count.
-func (s Stats) Total() int { return s.Specs + s.Entities + s.Indexes + s.Glossary }
+func (s Stats) Total() int { return s.Specs + s.Entities + s.Indexes + s.Glossary + s.Planning }
 
 // Generate assembles the Model from x and renders it in the given format into outDir.
 // An empty format defaults to Markdown.
@@ -86,6 +87,8 @@ func Generate(ctx context.Context, x store.Execer, outDir, format string) (*Stat
 			st.Entities++
 		case "glossary":
 			st.Glossary++
+		case "planning":
+			st.Planning++
 		default:
 			st.Indexes++
 		}

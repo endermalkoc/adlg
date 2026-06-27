@@ -69,12 +69,27 @@ data or configurable policy, not core. The **enum policy buckets** (closed / see
 - The `Domain` value set / `Domain.kind`, `Spec.kind`, milestone labels (`M0`–`M7`, `Future`), and
   Qase `TestCase.*` enums are **seed**; `Requirement.delivery_status` graduated to a **lookup table**.
 
+## Documentation conventions
+
+These keep the project's own docs (distinct from generated knowledge artifacts, invariant #2)
+organized and current:
+
+- **Project docs live in [docs/](docs/).** Markdown documentation belongs under `docs/` — the only
+  docs kept at the repo root are the conventional entrypoints [README.md](README.md),
+  [CLAUDE.md](CLAUDE.md), and [NOTICE](NOTICE). Don't add new doc files to the root; put them in
+  `docs/` and add a pointer to the [Repository layout](#repository-layout) list below.
+- **[ROADMAP.md](docs/ROADMAP.md) holds only what's *next*; completed work moves to
+  [docs/CHANGELOG.md](docs/CHANGELOG.md).** When a roadmap item ships, move it out of the roadmap and
+  record it in the changelog. For a partially-done item, split it: the finished part goes to the
+  changelog, the leftover stays in the roadmap as the remaining work. The roadmap is the to-do list;
+  the changelog is the record of what's built.
+
 ## Repository layout
 
 - [docs/entities/](docs/entities/index.md) — data model: entities, relationships, identifiers, decisions (root [ER.md](docs/ER.md) is a pointer stub)
 - [ARCHITECTURE.md](docs/ARCHITECTURE.md) — architecture, generation pipeline, interfaces, import
 - [README.md](README.md) — project overview
-- [CHANGELOG.md](CHANGELOG.md) — what's already built (completed work, moved out of the roadmap)
+- [docs/CHANGELOG.md](docs/CHANGELOG.md) — what's already built (completed work, moved out of the roadmap)
 - [ROADMAP.md](docs/ROADMAP.md) — what's next, and the beads-feature survey
 - [docs/codebase-map.md](docs/codebase-map.md) — **fresh-session orientation**: folder map, the
   beads reference, reading order, and where to pick up each roadmap item

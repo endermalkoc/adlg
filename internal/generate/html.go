@@ -36,25 +36,31 @@ func (r htmlRenderer) Render(m *Model) ([]File, error) {
 	if nav == nil {
 		nav = &Nav{}
 	}
+	planningBodies := planningHTMLBodies(m)
 	out := make([]File, 0, len(mdFiles)+1)
 	for _, f := range mdFiles {
 		title := docTitle(f.Content)
-		gfm := obsidianToGFM(f.Content, f.Path)
-		var buf bytes.Buffer
-		if err := r.md.Convert([]byte(gfm), &buf); err != nil {
-			return nil, err
-		}
 		htmlPath := strings.TrimSuffix(f.Path, ".md") + ".html"
 		rel := relPrefix(f.Path)
 		var body string
-		if f.Path == "index.md" {
+		switch {
+		case f.Path == "index.md":
 			// The root index is a browsable tree (sitemap) of the whole project.
 			body = "<h1>" + html.EscapeString(title) + "</h1>\n" +
 				`<p class="lede">Browse the project — specifications by domain, and shared entities.</p>` +
 				renderContentTree(nav, rel)
-		} else {
+		case planningBodies[f.Path] != "":
+			// Planning pages are rendered straight from the Model (pills, icons, tree) rather
+			// than from Markdown, so the GFM conversion is skipped for them.
+			body = planningBodies[f.Path]
+		default:
 			// Internal links get an xref class; priority badges and the frontmatter-sourced
 			// metadata bar (under the H1) decorate the converted body.
+			gfm := obsidianToGFM(f.Content, f.Path)
+			var buf bytes.Buffer
+			if err := r.md.Convert([]byte(gfm), &buf); err != nil {
+				return nil, err
+			}
 			body = injectMetaBar(
 				styleXrefLinks(decoratePriorities(buf.String())),
 				renderMetaBar(parseFrontmatter(f.Content), nav, rel))
@@ -181,8 +187,8 @@ func renderBreadcrumbs(nav *Nav, mdPath, title, rel string) string {
 
 	var cs []breadcrumb
 	// Spec/domain pages aren't physically under a "specifications/" directory, so prepend the
-	// section crumb; entity/glossary pages carry their section in the path already.
-	if segs[0] != "entities" && mdPath != "glossary.md" {
+	// section crumb; entity/planning/glossary pages carry their section in the path already.
+	if segs[0] != "entities" && segs[0] != "planning" && mdPath != "glossary.md" {
 		cs = append(cs, breadcrumb{Label: "Specifications", Href: rel + "index.html"})
 	}
 	for i, seg := range segs[:len(segs)-1] {
@@ -375,6 +381,14 @@ func pageKind(mdPath, fileKind string) string {
 		return "entities"
 	case mdPath == "glossary.md":
 		return "glossary"
+	case mdPath == "planning/index.md":
+		return "planning"
+	case mdPath == "planning/capabilities.md":
+		return "capability"
+	case mdPath == "planning/deliverables.md":
+		return "deliverable"
+	case mdPath == "planning/views.md":
+		return "view"
 	case strings.HasSuffix(mdPath, "/index.md") && strings.Count(mdPath, "/") == 1:
 		return "domain"
 	case fileKind == "entity":

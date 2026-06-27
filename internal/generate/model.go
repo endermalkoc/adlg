@@ -2,6 +2,7 @@ package generate
 
 import (
 	"context"
+	"sort"
 	"strings"
 
 	"github.com/endermalkoc/adlg/internal/refs"
@@ -13,13 +14,16 @@ import (
 // store: assembly and formatting are separate concerns. The JSON tags double as the JSON
 // serialization shape.
 type Model struct {
-	Domains    []*Domain      `json:"domains"`
-	Specs      []*Spec        `json:"specs"`
-	Entities   []*Entity      `json:"entities"`
-	Terms      []*Term        `json:"glossary,omitempty"`
-	Targets    []refs.Target  `json:"-"` // inline-ref resolution (doc renderers); not serialized
-	Priorities map[int]string `json:"-"` // level → label
-	Nav        *Nav           `json:"-"` // full site-navigation tree (HTML chrome); not serialized
+	Domains      []*Domain      `json:"domains"`
+	Specs        []*Spec        `json:"specs"`
+	Entities     []*Entity      `json:"entities"`
+	Terms        []*Term        `json:"glossary,omitempty"`
+	Capabilities []*Capability  `json:"capabilities,omitempty"`
+	Deliverables []*Deliverable `json:"deliverables,omitempty"`
+	Views        []*View        `json:"views,omitempty"`
+	Targets      []refs.Target  `json:"-"` // inline-ref resolution (doc renderers); not serialized
+	Priorities   map[int]string `json:"-"` // level → label
+	Nav          *Nav           `json:"-"` // full site-navigation tree (HTML chrome); not serialized
 }
 
 // Nav is the whole-project navigation tree — header data only (no bodies), so every HTML
@@ -170,6 +174,48 @@ type Term struct {
 	Aliases    []string `json:"aliases,omitempty"`
 }
 
+// Capability, Deliverable, and View are the planning layer (the "what to build" chain).
+// Relationships are denormalized to display titles at Load time, so renderers stay pure and
+// the JSON output is human-readable. NotionURL/BeadIDs carry the imported source pointers.
+type Capability struct {
+	ID           string   `json:"-"`
+	Title        string   `json:"title"`
+	Level        string   `json:"level,omitempty"` // domain|epic|capability
+	DomainSlug   string   `json:"domain,omitempty"`
+	ParentID     string   `json:"-"`
+	ParentTitle  string   `json:"parent,omitempty"`
+	Milestones   []string `json:"milestones,omitempty"`   // milestone slugs
+	Deliverables []string `json:"deliverables,omitempty"` // deliverable titles
+	NotionURL    string   `json:"notion_url,omitempty"`
+}
+
+// Deliverable is a unit of work (the external-task subject).
+type Deliverable struct {
+	ID           string   `json:"-"`
+	Title        string   `json:"title"`
+	Size         string   `json:"size,omitempty"`
+	Status       string   `json:"status,omitempty"`
+	AIReady      string   `json:"ai_ready,omitempty"`
+	Milestone    string   `json:"milestone,omitempty"`
+	Capabilities []string `json:"capabilities,omitempty"` // titles
+	Views        []string `json:"views,omitempty"`        // titles
+	BlockedBy    []string `json:"blocked_by,omitempty"`   // titles
+	NotionURL    string   `json:"notion_url,omitempty"`
+	BeadIDs      string   `json:"bead_ids,omitempty"`
+}
+
+// View is a UI surface, optionally backed by a spec (the bridge into the spec corpus).
+type View struct {
+	ID           string   `json:"-"`
+	Title        string   `json:"title"`
+	Route        string   `json:"route,omitempty"`
+	DomainSlug   string   `json:"domain,omitempty"`
+	SpecPath     string   `json:"spec,omitempty"` // backing spec doc path (.md); "" when unlinked
+	SpecTitle    string   `json:"spec_title,omitempty"`
+	Deliverables []string `json:"deliverables,omitempty"` // titles
+	NotionURL    string   `json:"notion_url,omitempty"`
+}
+
 // Load assembles the whole graph from the store into a Model. This is the single place
 // that queries; every renderer reads the returned structs.
 func Load(ctx context.Context, x store.Execer) (*Model, error) {
@@ -215,10 +261,144 @@ func Load(ctx context.Context, x store.Execer) (*Model, error) {
 		m.Terms = append(m.Terms, &Term{Slug: t.Slug, Term: t.Term, Definition: t.Definition, DomainSlug: t.DomainSlug, Aliases: t.Aliases})
 	}
 
+	if err := loadPlanning(ctx, x, m); err != nil {
+		return nil, err
+	}
+
 	if err := loadShared(ctx, x, m); err != nil {
 		return nil, err
 	}
 	return m, nil
+}
+
+// loadPlanning fills the planning layer (Capabilities/Deliverables/Views) with relationships
+// resolved to display titles. It is only called by the full Load (not LoadDocs): the planning
+// pages are whole-graph roll-ups, like the index pages, so they regenerate on a full rebuild.
+func loadPlanning(ctx context.Context, x store.Execer, m *Model) error {
+	capRows, err := store.ListCapabilities(ctx, x)
+	if err != nil {
+		return err
+	}
+	delivRows, err := store.ListDeliverables(ctx, x)
+	if err != nil {
+		return err
+	}
+	viewRows, err := store.ListPlanViews(ctx, x)
+	if err != nil {
+		return err
+	}
+	if len(capRows) == 0 && len(delivRows) == 0 && len(viewRows) == 0 {
+		return nil
+	}
+
+	capTitle := map[string]string{}
+	for _, c := range capRows {
+		capTitle[c.ID] = c.Title
+	}
+	delivTitle := map[string]string{}
+	for _, d := range delivRows {
+		delivTitle[d.ID] = d.Title
+	}
+	viewTitle := map[string]string{}
+	for _, v := range viewRows {
+		viewTitle[v.ID] = v.Title
+	}
+
+	// External source pointers (Notion url, Bead ids), keyed by subject id.
+	notionURL := map[string]string{}
+	beadIDs := map[string]string{}
+	extRefs, err := store.ListExternalRefsForSubjects(ctx, x)
+	if err != nil {
+		return err
+	}
+	for _, r := range extRefs {
+		switch r.System {
+		case "notion":
+			notionURL[r.SubjectID] = r.URL
+		case "beads":
+			beadIDs[r.SubjectID] = r.ExternalID
+		}
+	}
+
+	// Junctions → display-title lists per owner.
+	capMs := map[string][]string{}
+	if pairs, err := store.ListCapabilityMilestonePairs(ctx, x); err == nil {
+		for _, p := range pairs {
+			capMs[p.A] = append(capMs[p.A], p.B) // B is the milestone slug
+		}
+	} else {
+		return err
+	}
+	capDl := map[string][]string{} // capability → deliverable titles
+	dlCap := map[string][]string{} // deliverable → capability titles
+	if pairs, err := store.ListCapabilityDeliverablePairs(ctx, x); err == nil {
+		for _, p := range pairs {
+			if t := delivTitle[p.B]; t != "" {
+				capDl[p.A] = append(capDl[p.A], t)
+			}
+			if t := capTitle[p.A]; t != "" {
+				dlCap[p.B] = append(dlCap[p.B], t)
+			}
+		}
+	} else {
+		return err
+	}
+	dlView := map[string][]string{} // deliverable → view titles
+	viewDl := map[string][]string{} // view → deliverable titles
+	if pairs, err := store.ListDeliverableViewPairs(ctx, x); err == nil {
+		for _, p := range pairs {
+			if t := viewTitle[p.B]; t != "" {
+				dlView[p.A] = append(dlView[p.A], t)
+			}
+			if t := delivTitle[p.A]; t != "" {
+				viewDl[p.B] = append(viewDl[p.B], t)
+			}
+		}
+	} else {
+		return err
+	}
+	dlBlocked := map[string][]string{} // deliverable → blocked-by titles
+	if pairs, err := store.ListDeliverableDependencyPairs(ctx, x); err == nil {
+		for _, p := range pairs {
+			if t := delivTitle[p.B]; t != "" {
+				dlBlocked[p.A] = append(dlBlocked[p.A], t)
+			}
+		}
+	} else {
+		return err
+	}
+
+	for _, c := range capRows {
+		sort.Strings(capMs[c.ID])
+		sort.Strings(capDl[c.ID])
+		m.Capabilities = append(m.Capabilities, &Capability{
+			ID: c.ID, Title: c.Title, Level: c.Level, DomainSlug: c.DomainSlug,
+			ParentID: c.ParentID, ParentTitle: capTitle[c.ParentID],
+			Milestones: capMs[c.ID], Deliverables: capDl[c.ID], NotionURL: notionURL[c.ID],
+		})
+	}
+	for _, d := range delivRows {
+		sort.Strings(dlCap[d.ID])
+		sort.Strings(dlView[d.ID])
+		sort.Strings(dlBlocked[d.ID])
+		m.Deliverables = append(m.Deliverables, &Deliverable{
+			ID: d.ID, Title: d.Title, Size: d.Size, Status: d.Status, AIReady: d.AIReady, Milestone: d.MilestoneSlug,
+			Capabilities: dlCap[d.ID], Views: dlView[d.ID], BlockedBy: dlBlocked[d.ID],
+			NotionURL: notionURL[d.ID], BeadIDs: beadIDs[d.ID],
+		})
+	}
+	for _, v := range viewRows {
+		specPath := ""
+		if v.SpecSlug != "" {
+			specPath = store.SpecDocPath(v.SpecDomain, v.SpecPath, v.SpecSlug)
+		}
+		sort.Strings(viewDl[v.ID])
+		m.Views = append(m.Views, &View{
+			ID: v.ID, Title: v.Title, Route: v.Route, DomainSlug: v.DomainSlug,
+			SpecPath: specPath, SpecTitle: v.SpecTitle, Deliverables: viewDl[v.ID], NotionURL: notionURL[v.ID],
+		})
+	}
+	return nil
 }
 
 // LoadDocs assembles a partial Model holding only the named specs and entities (plus the
@@ -406,7 +586,28 @@ func loadNav(ctx context.Context, x store.Execer) (*Nav, error) {
 		insertDoc(parent, s.DomainSlug, tail, label, "spec")
 	}
 
-	// Section 2: Entities — under a single "entities/" tree, mirroring their doc paths.
+	// Section 2: Planning — capabilities / deliverables / views roll-up pages (shown only when
+	// planning data exists). Each sub-page appears only if it has rows.
+	caps, delivs, views, err := store.PlanningCounts(ctx, x)
+	if err != nil {
+		return nil, err
+	}
+	if caps+delivs+views > 0 {
+		planningNode := &NavNode{Label: "Planning", Href: "planning/index.html", Seg: "planning", Kind: "planning"}
+		nav.DirLabel["planning"] = "Planning"
+		if caps > 0 {
+			planningNode.Children = append(planningNode.Children, &NavNode{Label: "Capabilities", Href: "planning/capabilities.html", Seg: "capabilities", Kind: "capability"})
+		}
+		if delivs > 0 {
+			planningNode.Children = append(planningNode.Children, &NavNode{Label: "Deliverables", Href: "planning/deliverables.html", Seg: "deliverables", Kind: "deliverable"})
+		}
+		if views > 0 {
+			planningNode.Children = append(planningNode.Children, &NavNode{Label: "Views", Href: "planning/views.html", Seg: "views", Kind: "view"})
+		}
+		nav.Root = append(nav.Root, planningNode)
+	}
+
+	// Section 3: Entities — under a single "entities/" tree, mirroring their doc paths.
 	entitiesNode := &NavNode{Label: "Entities", Href: "entities/index.html", Seg: "entities", Kind: "entities"}
 	nav.DirLabel["entities"] = "Entities"
 	nav.Root = append(nav.Root, entitiesNode)

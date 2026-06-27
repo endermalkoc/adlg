@@ -1,17 +1,17 @@
 # ADLG Roadmap
 
-What's next. A living document — pairs with [CHANGELOG.md](../CHANGELOG.md) (what's already built),
+What's next. A living document — pairs with [CHANGELOG.md](CHANGELOG.md) (what's already built),
 [ARCHITECTURE.md](ARCHITECTURE.md) (how it's put together), [docs/entities/](entities/index.md) (the
 data model), and [docs/command-contract.md](command-contract.md) (the workflow every command follows).
 
-> Completed work lives in [CHANGELOG.md](../CHANGELOG.md). This file tracks what's left.
+> Completed work lives in [CHANGELOG.md](CHANGELOG.md). This file tracks what's left.
 
 ## Finish the command contract
 
 - **Broaden CRUD — remaining entities.** CRUD for the entities not yet modeled as CRUD: Milestone,
   Test*, Capability, Deliverable, View, ExternalRef. (The core surface —
   req/spec/domain/entity/glossary-term + `edge ls`/`delete` + `section delete` — is done; see
-  [CHANGELOG.md](../CHANGELOG.md).)
+  [CHANGELOG.md](CHANGELOG.md).)
 - **`adlg config get/set`** — a general typed `config get/set` over the lifted
   `internal/config`/`configfile` (Dolt server settings). (The workspace `generate` config —
   `config show` + `config generate enable/disable/add/remove/sync` — is done.)
@@ -24,18 +24,59 @@ data model), and [docs/command-contract.md](command-contract.md) (the workflow e
 
 | Feature | What | Status / notes |
 |---|---|---|
-| **Remote sync — remaining** | `adlg dolt clone`, federation (peers) | push/pull/remote/fetch + `adlg sync` are **done** (see [CHANGELOG.md](../CHANGELOG.md)). **Remaining:** `adlg dolt clone` (bootstrap a workspace from a remote — distinct flow, no existing `.adlg`) and federation/peers. |
+| **Remote sync — remaining** | `adlg dolt clone`, federation (peers) | push/pull/remote/fetch + `adlg sync` are **done** (see [CHANGELOG.md](CHANGELOG.md)). **Remaining:** `adlg dolt clone` (bootstrap a workspace from a remote — distinct flow, no existing `.adlg`) and federation/peers. |
 | **Batch add** | `adlg <entity> add --file <f>` and/or `adlg batch <f>` — bulk-create entities from a **JSON/CSV** file in ADLG's own shape, in **one changeset/commit** | adapt beads' `bd create --file`/`--graph`; rides the `Mutate` wrapper so the whole batch is one transaction + one Dolt commit. |
 | **Generic import** | `adlg import --format json\|csv <f>` — ingest **arbitrary external** JSON/CSV and map columns/fields into the schema via a mapping spec | **TODO.** The staging core (`internal/importer`: `Graph`/`Report`/idempotent `Apply`) exists from the tutor work; still needed is the external-shape → field-mapping front end (distinct from batch add). Routes through the contract. |
-| **Source adapters — remaining** | `adlg import <source>` — pluggable per-source adapters on the staging core | **`tutor` done** (see [CHANGELOG.md](../CHANGELOG.md) — read-only report + `--apply`, Domain→Entity). **Remaining:** `Test*` needs a Qase export (absent in the corpus); `EntityAttribute`/`EntityRelationship` need a non-prose source or an enrichment pass (they live in entity-doc prose, not a structured form). Future adapters reuse `importer.Apply`. |
+| **Source adapters — remaining** | `adlg import <source>` — pluggable per-source adapters on the staging core | **`tutor` done** (see [CHANGELOG.md](CHANGELOG.md) — read-only report + `--apply`, Domain→Entity). **Remaining:** `EntityAttribute`/`EntityRelationship` need a non-prose source or an enrichment pass (they live in entity-doc prose, not a structured form); test-management data is covered by the **Qase adapter** below. Future adapters reuse `importer.Apply`. |
+| **Qase adapter (tests)** | `adlg import qase <export\|--token>` — ingest a Qase project into the [testing layer](entities/testing.md) (test cases **and** test runs) | **TODO.** The testing schema is *already modeled on Qase*, so the mapping is near 1:1: suites → `TestSuite` (tree via `parent_id`), cases → `TestCase` (+ `TestStep`, + FR citations → `requirement_test_case` coverage), configurations → `Configuration`, runs → `TestRun` (+ `test_run_configuration`), results → `TestResult` — whose **deterministic** `uuidv5(run_id, test_case_id, configuration_id)` PK makes re-import idempotent. Qase's own **Plan** and **SharedStep** are intentionally omitted ([decision](entities/testing.md)). Source is the **Qase API** (token) or a **Qase export** (CSV/XML); a plain **JUnit/Qase run report** can feed just `TestRun`/`TestResult`. Read-only report + `--apply`; reuses the staging core + `app.Mutate`. The **Notion adapter** (done; see [CHANGELOG.md](CHANGELOG.md)) is the reference pattern. |
 | **Export** | `adlg export` — JSONL snapshot (git-friendly, diffable) | beads' model; useful for backups/interop alongside Dolt history. |
 | **Open Knowledge Format (OKF)** | interop with Google's [OKF](https://github.com/GoogleCloudPlatform/knowledge-catalog/blob/main/okf/SPEC.md): each concept is one `.md` with a YAML **frontmatter** block (`---`) + markdown body; concept id = file path minus `.md` (`tables/users.md` → `tables/users`); reserved `index.md` (grouped listings / progressive disclosure) + `log.md` (newest-first change history); frontmatter is **required `type`** + recommended `title`/`description`/`resource`/`tags`/`timestamp` (unknown fields preserved); cross-references are **plain markdown links** — bundle-absolute (`/tables/customers.md`) or relative (`./other.md`) — treated as **untyped directed edges** (relationship type lives in prose) | **TODO (requested).** ADLG already aligns closely: generated docs carry YAML frontmatter + H1 + body, we emit `index.md` sitemap pages, and our Dolt history is essentially `log.md` (`adlg log`). **Two options, decision deferred:** (a) an **OKF adapter** — import OKF bundles through the staging core + export an OKF bundle as a `generate` format (`--format okf`, with a generated `log.md` from `dolt_log`); or (b) **make the default Markdown output OKF-shaped** — frontmatter keyed to OKF (`type` ← ADLG layer, plus `title`/`description`/`tags`/`timestamp`) and cross-references rendered as **standard markdown links** (`/path.md`) instead of the current Obsidian wikilinks + `^block` anchors. **Gaps to bridge either way:** wikilink/block-ref → plain markdown link; map ADLG layers (spec/entity/requirement/term) → OKF `type`; add `log.md`; reconcile our `index.md` tree with OKF's listing convention. |
-| **Validation & analysis — remaining** | richer traceability (orphan-FR/coverage rollups), `impact` over `ent_relationship`, `adlg doctor` (health + auto-fix), drift detection | **`adlg check`** (inline-ref + cycle integrity) and **`adlg impact <ref>`** (graph traversal, `--transitive`) first slices are **done** (see [CHANGELOG.md](../CHANGELOG.md)). **Remaining:** richer traceability (orphan-FR/coverage rollups), `impact` over `ent_relationship` too, `doctor`/`drift` (adapt beads patterns; we have `schema.CheckForwardDrift`-style hooks). |
-| **Query / inspect — optional extensions** | a higher-level `query` DSL, a standalone `adlg diff <from> <to>` | `adlg sql`/`stats`/`search`/`log` are **done** (see [CHANGELOG.md](../CHANGELOG.md)). These extensions are optional, not blocking. |
+| **Validation & analysis — remaining** | richer traceability (orphan-FR/coverage rollups), `impact` over `ent_relationship`, `adlg doctor` (health + auto-fix), drift detection | **`adlg check`** (inline-ref + cycle integrity) and **`adlg impact <ref>`** (graph traversal, `--transitive`) first slices are **done** (see [CHANGELOG.md](CHANGELOG.md)). **Remaining:** richer traceability (orphan-FR/coverage rollups), `impact` over `ent_relationship` too, `doctor`/`drift` (adapt beads patterns; we have `schema.CheckForwardDrift`-style hooks). |
+| **Query / inspect — optional extensions** | a higher-level `query` DSL, a standalone `adlg diff <from> <to>` | `adlg sql`/`stats`/`search`/`log` are **done** (see [CHANGELOG.md](CHANGELOG.md)). These extensions are optional, not blocking. |
 | **Agent integration** | `adlg setup` → install into **Claude Code**, Codex, Cursor, Gemini, Aider, opencode; the **MCP server** (`adlg serve --mcp`) | **requested ("initialize into Claude Code").** Mirror beads' `cmd/bd/setup` (same agent targets). MCP is in the README roadmap. |
 | **DB maintenance** | `adlg backup`/`restore`, `gc` (Dolt GC), `compact`/`flatten` (history compaction) | Infra lifted in `versioncontrolops` (gc/compact/flatten); wire the CLI. |
-| **Self-update** | **`adlg upgrade`** — download the latest release binary, verify its checksum, and replace in place; **`adlg version`** reports the build | **requested.** Mirror beads' `cmd/bd/upgrade.go`; pairs with the GoReleaser/GitHub-Releases distribution in the README. |
 | **CLI polish** | **help system** (rich help + examples, `help-all` overview), shell completion | **requested (help).** Cobra gives base help/completion; add per-command examples and a top-level overview. |
+
+## Modules & plugins (separable layers)
+
+**Requested.** Package ADLG's [data-model layers](entities/index.md#layers) as **modules** a workspace
+installs independently — `requirements`, `testing`, `planning`, `entity`, `glossary`, `interop` layered
+on an always-on **core** (Structure + Review/Changeset + identifiers + the `Mutate` contract + the
+generation engine + the Dolt infra). A project that tracks only specs + FRs need not carry the testing or
+planning tables, verbs, or generated docs.
+
+The layered model is **already the seam**: each [docs/entities/](entities/index.md) layer is a
+self-contained bundle of tables, enums, verbs, renderers, and (where relevant) an import adapter. Modules
+formalize that boundary and operationalize the **generic-core invariant** (CLAUDE.md #4) — the core stays
+domain-free, every layer becomes opt-in.
+
+**A module owns, end to end:**
+
+- **Schema** — its own migration(s), so the monolithic `0001_init` splits into a core migration + per-module
+  migrations applied on install (reuse the `schema` runner / migration tracking).
+- **Verbs** — its CLI commands registered into the root only when enabled (`test*` ships with `testing`;
+  `capability`/`deliverable`/`view` with `planning`).
+- **Generation** — its renderers and `index.md` pages, gated like today's `config generate enable/disable`
+  (already a per-layer output toggle — modules generalize it).
+- **Seed / enums** — its seed value-sets, per the closed/seed/table [policy](entities/decisions.md).
+- **Import adapters** — Qase ships with `testing`; the Notion/`tutor` adapters with `structure`/`requirements`
+  (folds the "Source adapters" row above into module packaging).
+
+**Mechanism (sketch — design deferred):**
+
+- `adlg module list` / `install <name>` / `enable|disable <name>` — applies or removes the module's migration,
+  registers its verbs, toggles its renderers. The enabled set is recorded in a **`module` registry** (new core
+  table or workspace config) so `generate`, `Mutate` validation, and `check` know what's live.
+- **First-party "modules" vs third-party "plugins":** a single static Go binary has no portable dynamic-load
+  story, so in-tree modules are **build-time-registered** (a `Module` interface + registry that `main` wires;
+  runtime enable-state gates them). True out-of-tree **plugins** would ride a process boundary — the **MCP
+  server** or subprocess adapters — not Go `plugin`. Open question.
+
+**Cross-module edges (the hard part):** the polymorphic `Edge`/`EntityRef` `*_type` enums and the
+`requirement_test_case` coverage junction **span layers**. Decide which module owns a cross-layer junction, and
+how `check`/validation degrade when a reference points into a **not-installed** module (reject vs. tolerate as
+dangling). This warrants a new entry in [decisions.md](entities/decisions.md) and likely a `module` entity in
+the model once the design firms up.
 
 ## "What am I missing vs beads?" — feature survey
 
@@ -45,7 +86,7 @@ Cross-cutting beads features (not issue-domain), and ADLG's status:
 |---|---|
 | `dolt push/pull/remote`, `sync`, `federation` | push/pull/remote/fetch + `sync` **DONE**; `clone` + federation remaining |
 | `export` (JSONL) | **roadmap (Export)** |
-| `import` | **roadmap (Generic import + Source adapters: tutor)** |
+| `import` | **roadmap** — Generic import + Source adapters (`tutor`, `notion` done; `qase` planned) |
 | `batch` (bulk create) | **roadmap (Batch add — JSON/CSV)** |
 | `sql` (raw passthrough) | **DONE** (read-only) — Query/inspect |
 | `search` | **DONE** — Query/inspect |
@@ -55,7 +96,7 @@ Cross-cutting beads features (not issue-domain), and ADLG's status:
 | `setup` (agent install) | **roadmap (Agent integration)** |
 | MCP server | **roadmap (Agent integration)** |
 | `config` (get/set) | **Finish the command contract** |
-| `version`/`upgrade` (self-update) | **roadmap (Self-update)** |
+| `version`/`upgrade` (self-update) | **DONE** — `adlg version` + `adlg upgrade` (download + checksum-verify + replace in place) |
 | shell completion | **roadmap (CLI polish)** — cobra-provided |
 | `hooks` (`on_create`, …) | **deferred** — `internal/hooks` not lifted (needs a node concept) |
 | `worktree` commands | partial — `git.GetMainRepoRoot` is worktree-aware; explicit cmds maybe |
