@@ -88,7 +88,7 @@ What's built and what's next. A living document — pairs with [ARCHITECTURE.md]
 | **Source adapters** | `asdf import <source>` — pluggable per-source adapters on the staging core | **`tutor` done** (see Done — read-only report + `--apply`, Domain→Entity). Remaining: `Test*` needs a Qase export (absent in the corpus); `EntityAttribute`/`EntityRelationship` need a non-prose source or an enrichment pass. Future adapters reuse `importer.Apply`. |
 | **Export** | `asdf export` — JSONL snapshot (git-friendly, diffable) | beads' model; useful for backups/interop alongside Dolt history. |
 | **Validation & analysis** | `asdf check` (traceability), `asdf impact <id>` (graph traversal), `asdf doctor` (health + auto-fix), drift detection | **`asdf check` first slice DONE:** read-only whole-graph integrity — scans every prose field (`store.ListProseFields`) for inline `[[TYPE:key]]` tokens that don't resolve (`app.Check`), audits each acyclic edge kind for cycles (`findCycle`), honors the active changeset, exits nonzero on findings (gates CI/agents). **`asdf impact <ref>` DONE:** graph traversal around an entity (TYPE:key) — inbound (what references / points an edge at it = what's affected if it changes) and outbound (what it relies on), over entity_refs + edges, with `--transitive` for the reverse-edge blast radius (`app.Impact` + `store.ListAllEdges`/`ListEntityRefsFor`); honors the active changeset. **Remaining:** richer traceability (orphan-FR/coverage rollups), `impact` over `ent_relationship` too, `doctor`/`drift` (adapt beads patterns; we have `schema.CheckForwardDrift`-style hooks). |
-| **Query / inspect** | `asdf sql` (raw passthrough), `query`, `search`, `stats`, `history`/`diff` (Dolt-native), `show` | `sql` is a cheap, high-value passthrough. History/diff/blame come free from `dolt_*` system tables. |
+| **Query / inspect** | `asdf sql` (raw passthrough), `query`, `search`, `stats`, `history`/`diff` (Dolt-native), `show` | **DONE** ([query.go](../cmd/asdf/query.go)). **`asdf sql <query>`** — read-only passthrough (SELECT/SHOW/DESCRIBE/EXPLAIN/WITH only; writes rejected with exit 2, so the attributed write path is never bypassed — invariant #3), dynamic-column table output or `--json` array, honors the active changeset, and reaches the `dolt_*` system tables (history/diff/blame) and Dolt `AS OF` time-travel for free. **`asdf stats`** — counts per layer. **`asdf search <text>`** — LIKE across domain names / spec titles / requirement fr_keys+statements / entity names+descriptions / glossary terms (`store.Search`). **`asdf log`** — recent commits from `dolt_log`. A shared dynamic row-printer (`writeRows`) backs them. **Optional extensions (not blocking):** a higher-level `query` DSL and a standalone `asdf diff <from> <to>`. |
 | **Agent integration** | `asdf setup` → install into **Claude Code**, Codex, Cursor, Gemini, Aider, opencode; the **MCP server** (`asdf serve --mcp`) | **requested ("initialize into Claude Code").** Mirror beads' `cmd/bd/setup` (same agent targets). MCP is in the README roadmap. |
 | **DB maintenance** | `asdf backup`/`restore`, `gc` (Dolt GC), `compact`/`flatten` (history compaction) | Infra lifted in `versioncontrolops` (gc/compact/flatten); wire the CLI. |
 | **Self-update** | **`asdf upgrade`** — download the latest release binary, verify its checksum, and replace in place; **`asdf version`** reports the build | **requested.** Mirror beads' `cmd/bd/upgrade.go`; pairs with the GoReleaser/GitHub-Releases distribution in the README. |
@@ -104,8 +104,8 @@ Cross-cutting beads features (not issue-domain), and ASDF's status:
 | `export` (JSONL) | **roadmap (Export)** |
 | `import` | **roadmap (Generic import + Source adapters: tutor)** |
 | `batch` (bulk create) | **roadmap (Batch add — JSON/CSV)** |
-| `sql` (raw passthrough) | **roadmap (Query)** |
-| `search` | **roadmap (Query)** |
+| `sql` (raw passthrough) | **DONE** (read-only) — Query/inspect |
+| `search` | **DONE** — Query/inspect |
 | `backup`/`restore` | **roadmap (DB maintenance)** |
 | `doctor`, `drift`, `preflight` | **roadmap (Validation & analysis)** |
 | `gc`, `compact`, `flatten` | infra lifted → **roadmap (DB maintenance)** |
@@ -117,7 +117,7 @@ Cross-cutting beads features (not issue-domain), and ASDF's status:
 | `hooks` (`on_create`, …) | **deferred** — `internal/hooks` not lifted (needs a node concept) |
 | `worktree` commands | partial — `git.GetMainRepoRoot` is worktree-aware; explicit cmds maybe |
 | `metrics`/telemetry | likely **skip / opt-in** |
-| `stats`, `count`, `info`, `history`, `where` | **roadmap (Query/inspect)** |
+| `stats`, `count`, `info`, `history`, `where` | `stats` + `history` (`log`) **DONE**; rest **roadmap (Query/inspect)** |
 
 **Generate (Markdown/JSON/HTML), cross-references, and the glossary are ASDF-originals beads has none
 of** — beads is an issue tracker that snapshots to JSONL; ASDF is a spec/knowledge store whose

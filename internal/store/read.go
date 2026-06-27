@@ -654,3 +654,53 @@ func ListEntityRefsByOwner(ctx context.Context, x Execer, ownerType, ownerID str
 	}
 	return out, rows.Err()
 }
+
+// SearchHit is one match from a cross-entity text search.
+type SearchHit struct {
+	Type  string `json:"type"`  // domain | spec | requirement | entity | term
+	Key   string `json:"key"`   // identifier: slug | prefix-or-slug | fr_key | name
+	Label string `json:"label"` // title / name / term / statement
+	Path  string `json:"path,omitempty"`
+}
+
+// Search matches a SQL LIKE pattern across the human-facing text of every layer — domain
+// names, spec titles, requirement fr_keys/statements, entity names/descriptions, and glossary
+// terms/definitions — returning a uniform hit list (read-only; honors the caller's branch).
+func Search(ctx context.Context, x Execer, pattern string) ([]SearchHit, error) {
+	const fullPath = "CONCAT(d.slug,'/',IF(COALESCE(s.path,'')='','',CONCAT(s.path,'/')),COALESCE(s.slug,''),'.md')"
+	q := "SELECT 'domain', dom.slug, COALESCE(dom.name,dom.slug), '' FROM `req_domain` dom " +
+		"WHERE dom.name LIKE ? OR dom.slug LIKE ? " +
+		"UNION ALL " +
+		"SELECT 'spec', COALESCE(s.prefix,s.slug), COALESCE(s.title,s.slug), " + fullPath + " " +
+		"FROM `req_spec` s JOIN `req_domain` d ON s.domain_id=d.id " +
+		"WHERE s.title LIKE ? OR s.slug LIKE ? OR s.prefix LIKE ? " +
+		"UNION ALL " +
+		"SELECT 'requirement', r.fr_key, COALESCE(r.statement,''), " + fullPath + " " +
+		"FROM `req_requirement` r JOIN `req_spec` s ON r.spec_id=s.id JOIN `req_domain` d ON s.domain_id=d.id " +
+		"WHERE r.fr_key LIKE ? OR r.statement LIKE ? " +
+		"UNION ALL " +
+		"SELECT 'entity', e.name, COALESCE(e.description,''), '' FROM `ent_entity` e " +
+		"WHERE e.name LIKE ? OR e.description LIKE ? " +
+		"UNION ALL " +
+		"SELECT 'term', t.slug, COALESCE(t.term,t.slug), COALESCE(t.definition,'') FROM `req_glossary_term` t " +
+		"WHERE t.term LIKE ? OR t.slug LIKE ? OR t.definition LIKE ? " +
+		"LIMIT 200"
+	args := make([]any, 12)
+	for i := range args {
+		args[i] = pattern
+	}
+	rows, err := x.QueryContext(ctx, q, args...)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var out []SearchHit
+	for rows.Next() {
+		var h SearchHit
+		if err := rows.Scan(&h.Type, &h.Key, &h.Label, &h.Path); err != nil {
+			return nil, err
+		}
+		out = append(out, h)
+	}
+	return out, rows.Err()
+}
