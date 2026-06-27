@@ -8,6 +8,7 @@ import (
 	"context"
 	"database/sql"
 	"fmt"
+	"os"
 
 	"github.com/endermalkoc/asdf/internal/storage/versioncontrolops"
 	"github.com/endermalkoc/asdf/internal/store"
@@ -93,9 +94,18 @@ func Mutate(ctx context.Context, ws *workspace.Workspace, o MutateOpts, body fun
 		return err
 	}
 
-	// 6. Record the Dolt commit on the pinned conn, outside the tx.
-	if err := versioncontrolops.StageAndCommit(ctx, conn, w.dirty.DirtyTables(), o.Summary, actor.CommitAuthorString()); err != nil {
+	// 6. Record the Dolt commit on the pinned conn, outside the tx. Capture the pre-commit
+	//    HEAD so auto-generation can diff exactly the commit we are about to make.
+	parentHash, _ := headCommitHash(ctx, conn)
+	dirtyTables := w.dirty.DirtyTables()
+	if err := versioncontrolops.StageAndCommit(ctx, conn, dirtyTables, o.Summary, actor.CommitAuthorString()); err != nil {
 		return fmt.Errorf("committing change: %w", err)
+	}
+
+	// 7. Incrementally regenerate the affected artifacts (best-effort: the change is already
+	//    committed, so a generation failure is a warning, not a rolled-back mutation).
+	if err := AutoGenerate(ctx, ws, conn, branch, parentHash, dirtyTables); err != nil {
+		fmt.Fprintln(os.Stderr, "warning: auto-generate failed:", err)
 	}
 	return nil
 }

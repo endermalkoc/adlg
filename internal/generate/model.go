@@ -132,50 +132,9 @@ func Load(ctx context.Context, x store.Execer) (*Model, error) {
 		return nil, err
 	}
 	for _, sr := range specRows {
-		sp := &Spec{
-			Prefix: sr.Prefix, Slug: sr.Slug, Title: sr.Title, Domain: sr.DomainSlug, Status: sr.Status,
-			Path: store.SpecDocPath(sr.DomainSlug, sr.Path, sr.Slug),
-		}
-		secRows, err := store.ListSpecSections(ctx, x, sr.ID)
+		sp, err := loadSpecDoc(ctx, x, sr)
 		if err != nil {
 			return nil, err
-		}
-		sp.Sections = toSections(secRows)
-		storyRows, err := store.ListStoriesBySpec(ctx, x, sr.ID)
-		if err != nil {
-			return nil, err
-		}
-		for _, st := range storyRows {
-			s := &Story{
-				Position: st.Position, Title: st.Title, Priority: st.Priority, AsA: st.AsA,
-				IWant: st.IWant, SoThat: st.SoThat, Narrative: st.Narrative,
-				WhyPriority: st.WhyPriority, IndependentTest: st.IndependentTest,
-			}
-			scnRows, err := store.ListScenariosByStory(ctx, x, st.ID)
-			if err != nil {
-				return nil, err
-			}
-			for _, sc := range scnRows {
-				s.Scenarios = append(s.Scenarios, &Scenario{Position: sc.Position, Given: sc.Given, When: sc.When, Then: sc.Then})
-			}
-			sp.Stories = append(sp.Stories, s)
-		}
-		groupRows, err := store.ListReqGroups(ctx, x, sr.ID)
-		if err != nil {
-			return nil, err
-		}
-		for _, g := range groupRows {
-			sp.Groups = append(sp.Groups, &Group{ID: g.ID, Position: g.Position, Title: g.Title, Notes: g.Notes})
-		}
-		reqRows, err := store.ListReqsBySpecID(ctx, x, sr.ID)
-		if err != nil {
-			return nil, err
-		}
-		for _, r := range reqRows {
-			sp.Requirements = append(sp.Requirements, &Requirement{
-				FRKey: r.FRKey, Number: r.Number, Suffix: r.Suffix, GroupID: r.GroupID,
-				Position: r.Position, Statement: r.Statement, DeliveryStatus: r.DeliveryStatus, Milestone: r.Milestone,
-			})
 		}
 		m.Specs = append(m.Specs, sp)
 	}
@@ -185,12 +144,10 @@ func Load(ctx context.Context, x store.Execer) (*Model, error) {
 		return nil, err
 	}
 	for _, er := range entityRows {
-		e := &Entity{Name: er.Name, Description: er.Description, Status: er.Status, DocPath: er.DocPath}
-		secRows, err := store.ListEntitySections(ctx, x, er.ID)
+		e, err := loadEntityDoc(ctx, x, er)
 		if err != nil {
 			return nil, err
 		}
-		e.Sections = toSections(secRows)
 		m.Entities = append(m.Entities, e)
 	}
 
@@ -202,19 +159,141 @@ func Load(ctx context.Context, x store.Execer) (*Model, error) {
 		m.Terms = append(m.Terms, &Term{Slug: t.Slug, Term: t.Term, Definition: t.Definition, DomainSlug: t.DomainSlug, Aliases: t.Aliases})
 	}
 
+	if err := loadShared(ctx, x, m); err != nil {
+		return nil, err
+	}
+	return m, nil
+}
+
+// LoadDocs assembles a partial Model holding only the named specs and entities (plus the
+// full shared Targets+Priorities, so inline cross-reference links still resolve). It is the
+// fast path for incremental regeneration: render this model and keep only the spec/entity
+// files — the index/glossary inputs are intentionally left empty, since a partial model
+// cannot produce correct index pages (those are full-graph rollups).
+func LoadDocs(ctx context.Context, x store.Execer, specIDs, entityIDs []string) (*Model, error) {
+	m := &Model{}
+	if len(specIDs) > 0 {
+		want := make(map[string]bool, len(specIDs))
+		for _, id := range specIDs {
+			want[id] = true
+		}
+		specRows, err := store.ListSpecs(ctx, x)
+		if err != nil {
+			return nil, err
+		}
+		for _, sr := range specRows {
+			if !want[sr.ID] {
+				continue
+			}
+			sp, err := loadSpecDoc(ctx, x, sr)
+			if err != nil {
+				return nil, err
+			}
+			m.Specs = append(m.Specs, sp)
+		}
+	}
+	if len(entityIDs) > 0 {
+		want := make(map[string]bool, len(entityIDs))
+		for _, id := range entityIDs {
+			want[id] = true
+		}
+		entityRows, err := store.ListEntities(ctx, x)
+		if err != nil {
+			return nil, err
+		}
+		for _, er := range entityRows {
+			if !want[er.ID] {
+				continue
+			}
+			e, err := loadEntityDoc(ctx, x, er)
+			if err != nil {
+				return nil, err
+			}
+			m.Entities = append(m.Entities, e)
+		}
+	}
+	if err := loadShared(ctx, x, m); err != nil {
+		return nil, err
+	}
+	return m, nil
+}
+
+// loadSpecDoc reads one spec header row into a fully-populated *Spec (sections, stories +
+// scenarios, requirement groups, requirements). Shared by the full Load and LoadDocs.
+func loadSpecDoc(ctx context.Context, x store.Execer, sr store.SpecRow) (*Spec, error) {
+	sp := &Spec{
+		Prefix: sr.Prefix, Slug: sr.Slug, Title: sr.Title, Domain: sr.DomainSlug, Status: sr.Status,
+		Path: store.SpecDocPath(sr.DomainSlug, sr.Path, sr.Slug),
+	}
+	secRows, err := store.ListSpecSections(ctx, x, sr.ID)
+	if err != nil {
+		return nil, err
+	}
+	sp.Sections = toSections(secRows)
+	storyRows, err := store.ListStoriesBySpec(ctx, x, sr.ID)
+	if err != nil {
+		return nil, err
+	}
+	for _, st := range storyRows {
+		s := &Story{
+			Position: st.Position, Title: st.Title, Priority: st.Priority, AsA: st.AsA,
+			IWant: st.IWant, SoThat: st.SoThat, Narrative: st.Narrative,
+			WhyPriority: st.WhyPriority, IndependentTest: st.IndependentTest,
+		}
+		scnRows, err := store.ListScenariosByStory(ctx, x, st.ID)
+		if err != nil {
+			return nil, err
+		}
+		for _, sc := range scnRows {
+			s.Scenarios = append(s.Scenarios, &Scenario{Position: sc.Position, Given: sc.Given, When: sc.When, Then: sc.Then})
+		}
+		sp.Stories = append(sp.Stories, s)
+	}
+	groupRows, err := store.ListReqGroups(ctx, x, sr.ID)
+	if err != nil {
+		return nil, err
+	}
+	for _, g := range groupRows {
+		sp.Groups = append(sp.Groups, &Group{ID: g.ID, Position: g.Position, Title: g.Title, Notes: g.Notes})
+	}
+	reqRows, err := store.ListReqsBySpecID(ctx, x, sr.ID)
+	if err != nil {
+		return nil, err
+	}
+	for _, r := range reqRows {
+		sp.Requirements = append(sp.Requirements, &Requirement{
+			FRKey: r.FRKey, Number: r.Number, Suffix: r.Suffix, GroupID: r.GroupID,
+			Position: r.Position, Statement: r.Statement, DeliveryStatus: r.DeliveryStatus, Milestone: r.Milestone,
+		})
+	}
+	return sp, nil
+}
+
+// loadEntityDoc reads one entity header row into a fully-populated *Entity (its sections).
+func loadEntityDoc(ctx context.Context, x store.Execer, er store.EntityRow) (*Entity, error) {
+	e := &Entity{Name: er.Name, Description: er.Description, Status: er.Status, DocPath: er.DocPath}
+	secRows, err := store.ListEntitySections(ctx, x, er.ID)
+	if err != nil {
+		return nil, err
+	}
+	e.Sections = toSections(secRows)
+	return e, nil
+}
+
+// loadShared fills the model's cross-cutting inputs that every renderer needs regardless of
+// which docs are present: the inline-ref target table and the priority labels.
+func loadShared(ctx context.Context, x store.Execer, m *Model) error {
 	targets, err := store.ListRefTargets(ctx, x)
 	if err != nil {
-		return nil, err
+		return err
 	}
 	m.Targets = toTargets(targets)
-
 	prio, err := loadPriorityLabels(ctx, x)
 	if err != nil {
-		return nil, err
+		return err
 	}
 	m.Priorities = prio
-
-	return m, nil
+	return nil
 }
 
 func toSections(rows []store.SectionRow) []*Section {
