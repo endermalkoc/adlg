@@ -11,21 +11,21 @@ pre-release.
 ### Foundation
 
 - **Dolt infrastructure** (salvaged from [beads](https://github.com/steveyegge/beads), MIT — see
-  [NOTICE](../NOTICE)): owned/external/embedded server management (`internal/doltserver`), the warm
+  [NOTICE](../NOTICE)): owned/external/embedded server management (`src/cli/internal/doltserver`), the warm
   proxy daemon (`dbproxy`), version-control ops over a `DBConn` (`versioncontrolops`: branch/
   commit/merge/clone/gc/flatten/backup), remotes (`remotecache`, `doltremote`), config/git/error
   helpers. Issue-domain dependency severed to a minimal shim; all pure-Go, building clean.
 - **Data model** ([docs/entities/](entities/index.md)) — authoritative, consistent, with the
   deterministic relationship-PK rule.
 - **Schema** — `0001_init` (26 entities + 6 junctions) + `0002` (`domain.description`) + a migration
-  runner (`internal/storage/schema`); validated against real Dolt (FK/UNIQUE/deterministic-PK enforced).
-- **ID minting** (`internal/ids`) — ULID (authored rows) + deterministic `uuidv5` (relationships).
+  runner (`src/cli/internal/storage/schema`); validated against real Dolt (FK/UNIQUE/deterministic-PK enforced).
+- **ID minting** (`src/cli/internal/ids`) — ULID (authored rows) + deterministic `uuidv5` (relationships).
 - **`cusp init`** — creates `.cusp/`, starts a managed (owned) `dolt sql-server`, applies the
   schema, seeds the actor, records the initial Dolt commit.
 
 ### Command contract & CRUD
 
-- **Command contract** (`internal/app.Mutate`) — every mutating command: managed connect →
+- **Command contract** (`src/cli/internal/app.Mutate`) — every mutating command: managed connect →
   resolve changeset/`main` target → validate → transaction → mint → attribute/timestamp → real
   Dolt commit with actor+message (clean working set). Bad input fails before any write.
 - **Entity CRUD** — `add`/`ls`/`show`/`edit`/`delete` across `domain`/`spec`/`req`/`entity`/`term`
@@ -71,12 +71,12 @@ pre-release.
 - **Generate** — `cusp generate --format md|json|html`: DB → git-ignored read artifacts.
   **md/json/html. Cusp-original** — beads has no generate; it exports JSONL. Core to the "generated,
   never edited" principle. **Renderer architecture:** `Load` assembles the graph once into a
-  format-agnostic view `Model` ([model.go](../internal/generate/model.go)); a `Renderer` turns it
+  format-agnostic view `Model` ([model.go](../src/cli/internal/generate/model.go)); a `Renderer` turns it
   into output files. Two families: **document** (Markdown — Obsidian wikilinks+block-refs; HTML —
   same pipeline transformed to relative `.html` links via goldmark) and **data** (JSON — per-doc
   records + an `index.json` manifest, prose keeps raw `[[TYPE:key]]` tokens). Markdown is
   byte-identical across the refactor; adding a format = one `Renderer`. HTML ships a **default
-  static-site theme** ([css.go](../internal/generate/css.go), [html.go](../internal/generate/html.go)):
+  static-site theme** ([css.go](../src/cli/internal/generate/css.go), [html.go](../src/cli/internal/generate/html.go)):
   a clean StrictDoc-like stylesheet (written once to `assets/style.css`), an **always-visible sidebar
   tree** and **breadcrumbs** organized under top-level **sections** — **Specifications** (all domains
   → nested sub-directory groups → spec docs) and **Entities** (with Glossary and more to come) — that
@@ -87,7 +87,7 @@ pre-release.
   complete, byte-identical navigation), with directory groups collapsible (`<details>`), only the
   current page's branch auto-expanded (siblings stay collapsed, so navigating never re-expands the
   whole tree — there is no script), and the current page highlighted. **Iconography**
-  ([icons.go](../internal/generate/icons.go), inline Feather SVGs): type glyphs in the nav/breadcrumb
+  ([icons.go](../src/cli/internal/generate/icons.go), inline Feather SVGs): type glyphs in the nav/breadcrumb
   bar (domain, folder, spec, entity, glossary) and **color-graded priority badges** on user stories
   (0 Critical → 4 Backlog), decorated onto the rendered HTML so the Markdown view stays clean.
   **Spec metadata bar:** id, a colored status badge, the source created date, and the linked domain
@@ -102,27 +102,27 @@ pre-release.
   `Created` into `spec.created_at`, so that metadata lives only in structured columns.
   **Planning layer:** all renderers also emit a **Planning** section — `planning/index` plus
   `capabilities` / `deliverables` / `views` roll-up pages (Markdown + HTML) and a single
-  `planning.json` (`internal/generate/model.go` `loadPlanning` + `internal/store/planning_read.go`).
+  `planning.json` (`src/cli/internal/generate/model.go` `loadPlanning` + `src/cli/internal/store/planning_read.go`).
   Capabilities render as a **hierarchy** (domain › epic › capability, grouped by domain) — a
   nested list in Markdown, a guide-railed tree in HTML; deliverables group by milestone (with
   their linked capabilities/views/blocked-by) and views group by domain with their **route** and
   a wikilink to the backing spec. The HTML pages are rendered **straight from the Model**
-  (`internal/generate/planning_html.go`) so enum values become colored **pills** (level, size,
+  (`src/cli/internal/generate/planning_html.go`) so enum values become colored **pills** (level, size,
   deliverable status, AI-ready, milestone) and every row/section carries a **type icon**; the
   section appears in the nav/sitemap/breadcrumbs only when planning data exists. Relationships
   resolve to display titles; `notion_url` stays in `planning.json` as source metadata but is not
   rendered as a link.
 - **Incremental generation** — auto-regenerate only the **affected** output docs on **every DB
   change** (CLI *or* MCP), in the user-configured subset of formats. Hooked at `app.Mutate`
-  ([autogen.go](../internal/app/autogen.go)): after a successful commit **to `main`** (changeset
+  ([autogen.go](../src/cli/internal/app/autogen.go)): after a successful commit **to `main`** (changeset
   drafts update on merge, not in flight), it classifies the commit's dirty tables from the **Dolt
   diff** (`dolt_diff(parent, head, table)` — survives `DeleteNodeRefs`, so it's correct for deletes).
   **Fast path:** a change confined to a spec/entity's content (section, story, scenario, group, or a
   requirement *statement* edit — fr_key unchanged) re-renders **only that document**, via targeted
-  loaders `LoadDocs`/`loadSpecDoc`/`loadEntityDoc` ([model.go](../internal/generate/model.go)) — no
+  loaders `LoadDocs`/`loadSpecDoc`/`loadEntityDoc` ([model.go](../src/cli/internal/generate/model.go)) — no
   full `Load`. **Full path:** a structural change (spec/entity/domain/term/section-type or fr_key
   added/removed/renamed) can move indexes or the inline-ref target set, so it rebuilds the whole
-  graph. **Either way** `Sync` ([incremental.go](../internal/generate/incremental.go)) writes only
+  graph. **Either way** `Sync` ([incremental.go](../src/cli/internal/generate/incremental.go)) writes only
   files whose content **hash** changed against a per-out-dir `.cusp-manifest.json` (full rebuild also
   deletes orphans). Pure non-render commits (`edge add`, ref index) generate nothing. **Config:**
   `.cusp/config.json` `generate.enabled` + `formats:[{format, out}]`, out defaults to
@@ -152,9 +152,9 @@ pre-release.
 
 ### Import
 
-- **Import pipeline + `tutor` source adapter** — a source-agnostic staging core (`internal/importer`:
+- **Import pipeline + `tutor` source adapter** — a source-agnostic staging core (`src/cli/internal/importer`:
   a `Graph` of Cusp entity shapes + a drift/ER-gap `Report` + an idempotent `Apply` writer keyed on
-  business identifiers) and the deterministic, **no-LLM** `tutor` adapter (`internal/importer/tutor`).
+  business identifiers) and the deterministic, **no-LLM** `tutor` adapter (`src/cli/internal/importer/tutor`).
   `cusp import tutor <docs>` parses **Domain/Spec/Requirement/UserStory/AcceptanceScenario/Edge/
   Milestone/Entity** and reports counts + coverage + drift; `--apply` loads the graph
   through `app.Mutate` (one changeset/`main` commit), idempotent on re-run. Validated against the
@@ -164,7 +164,7 @@ pre-release.
   access rules stay as entity-doc prose (migration `0012`, [decisions.md](entities/decisions.md)).
 - **Notion source adapter (planning layer)** — `cusp import notion` ingests the Notion
   Capabilities / Deliverables / Views databases into the [planning layer](entities/planning.md)
-  (`internal/importer/notion`). Maps each page → `Capability` (3-tier `level`, self-nested via
+  (`src/cli/internal/importer/notion`). Maps each page → `Capability` (3-tier `level`, self-nested via
   `parent_id`), `Deliverable` (`size`/`status`/`ai_ready`, milestone-scoped — Notion's `—`
   placeholder → `proposed`, `Yes/No/N/A` → `yes/no/na`), and `View` (route; soft `spec_id` resolved
   by unique spec slug, best-effort); Notion **relation** properties → the planning junctions
@@ -187,7 +187,7 @@ pre-release.
 - **Remote sync — push/pull/remote/fetch + sync.** `cusp dolt remote add/remove/ls`,
   `cusp dolt push/pull/fetch [remote] [branch]` (default origin/main, `--force`, `--user` +
   `DOLT_REMOTE_PASSWORD`), and `cusp sync` (pull-then-push the canonical branch). Orchestration in
-  [app/remote.go](../internal/app/remote.go) pins one connection (branch state is connection-scoped;
+  [app/remote.go](../src/cli/internal/app/remote.go) pins one connection (branch state is connection-scoped;
   a pull's merge needs one session — runs through `MergeAndSettle`) over the lifted
   `versioncontrolops` primitives; a pull/sync that advanced the branch **refreshes the generated
   artifacts** if auto-gen is enabled (a merge bypasses the `Mutate` hook). Verified end-to-end
@@ -196,21 +196,21 @@ pre-release.
 
 ### Server, branches & DB maintenance
 
-- **Dolt server lifecycle — `cusp dolt start/stop/status`** ([dolt.go](../cmd/cusp/dolt.go)).
+- **Dolt server lifecycle — `cusp dolt start/stop/status`** ([dolt.go](../src/cli/cmd/cusp/dolt.go)).
   `start` starts (or adopts, idempotently) the managed owned server; `stop` gracefully shuts it
   down (flush → SIGTERM → SIGKILL, `--force` to skip the wait); `status` reports mode + pid/port/
   data-dir/logs (text or `--json`). `start`/`stop` refuse when the workspace targets an external
   server (`--dsn`/`$CUSP_DSN` or an explicit port). Closes the gap where owned mode could auto-start
   a server but offered no clean stop — wraps the lifted `doltserver.Start/StopWithForce/IsRunning`.
 - **Raw branch escape hatch — `cusp branch ls/create/delete/checkout`**
-  ([branch.go](../cmd/cusp/branch.go), [app/branch.go](../internal/app/branch.go)). The low-level
+  ([branch.go](../src/cli/cmd/cusp/branch.go), [app/branch.go](../src/cli/internal/app/branch.go)). The low-level
   view beneath the changeset model: `ls` lists Dolt branches (marks the active target, tags
   `changeset/*`), `create` branches off the active target, `delete` removes one (refuses `main` and
   the active target), `checkout` retargets the ambient read/write branch (reusing the active-changeset
   pointer; `main` clears it). For the tracked PR workflow use `cusp changeset`; these are for
   diagnostics and manual surgery.
 - **History maintenance — `cusp flatten` + `cusp dolt compact`**
-  ([flatten.go](../cmd/cusp/flatten.go), [app/maintenance.go](../internal/app/maintenance.go)).
+  ([flatten.go](../src/cli/cmd/cusp/flatten.go), [app/maintenance.go](../src/cli/internal/app/maintenance.go)).
   `flatten` squashes all Dolt history into one snapshot (irreversible; `--force`/`--dry-run`);
   `dolt compact --days N` squashes commits older than the window into one base, cherry-picking the
   recent ones on top (`--force`/`--dry-run`), driving the lifted `versioncontrolops.Compact` from the
@@ -219,7 +219,7 @@ pre-release.
 
 ### Query & inspect
 
-- **Query / inspect — `sql`/`stats`/`search`/`log`** ([query.go](../cmd/cusp/query.go)).
+- **Query / inspect — `sql`/`stats`/`search`/`log`** ([query.go](../src/cli/cmd/cusp/query.go)).
   **`cusp sql <query>`** — read-only passthrough (SELECT/SHOW/DESCRIBE/EXPLAIN/WITH only; writes
   rejected with exit 2, so the attributed write path is never bypassed — invariant #3),
   dynamic-column table output or `--json` array, honors the active changeset, and reaches the
@@ -242,12 +242,12 @@ pre-release.
 
 ### Distribution & self-update
 
-- **`cusp version`** ([version.go](../cmd/cusp/version.go)) — reports version / commit / build date /
+- **`cusp version`** ([version.go](../src/cli/cmd/cusp/version.go)) — reports version / commit / build date /
   Go toolchain / os·arch (human or `--json`). Build metadata is injected at release time via ldflags
   (GoReleaser / Makefile) and falls back to `runtime/debug.ReadBuildInfo()` for `go install` builds.
   See [build-and-release.md](build-and-release.md).
-- **`cusp upgrade [version]`** — self-update in place ([upgrade.go](../cmd/cusp/upgrade.go) +
-  `internal/selfupdate`). Resolves the latest GitHub release (or a pinned tag), downloads the archive
+- **`cusp upgrade [version]`** — self-update in place ([upgrade.go](../src/cli/cmd/cusp/upgrade.go) +
+  `src/cli/internal/selfupdate`). Resolves the latest GitHub release (or a pinned tag), downloads the archive
   for the running OS/arch, **verifies its SHA-256 against the release's `checksums.txt`**, then
   atomically replaces the running binary (rename on Unix; move-aside on Windows). `--check` reports
   availability without installing; `--json` for scripts; fails fast with a clear message when the
@@ -266,7 +266,7 @@ pre-release.
   Graph) was hard to remember and gave the CLI no memorable handle. Renamed to **Cusp** — a short,
   brandable name (a *cusp* is the point of transition where one state becomes the next: spec →
   requirement → test → shipped code), verified collision-free in the dev-tool/agentic space. Applied
-  end-to-end: command/binary `cusp`, the `cmd/cusp` entrypoint, the `.cusp/` config/workspace dir,
+  end-to-end: command/binary `cusp`, the `src/cli/cmd/cusp` entrypoint, the `.cusp/` config/workspace dir,
   the `CUSP_*` env prefix, **the Go module path (`github.com/endermalkoc/cusp`), all internal
   identifiers** (`cuspDir`, `EnsureCuspDir`, …), the shared-server global DB name (`cusp_global`), and
   all docs/help/output; *Agentic Delivery Lifecycle Graph* is retained as the tagline. The GitHub repo

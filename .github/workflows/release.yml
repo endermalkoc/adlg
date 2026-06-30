@@ -19,8 +19,9 @@ jobs:
 
       - uses: actions/setup-go@v5
         with:
-          go-version-file: go.mod
+          go-version-file: src/cli/go.mod
           cache: true
+          cache-dependency-path: src/cli/go.sum
 
       - uses: goreleaser/goreleaser-action@v6
         with:

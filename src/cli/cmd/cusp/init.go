@@ -115,8 +115,23 @@ var initCmd = &cobra.Command{
 		if err := cfg.Save(cuspDir); err != nil {
 			return err
 		}
+		// .cusp/.gitignore controls what the HOST repo's git tracks. Only metadata.json
+		// (and this file) are committable; the Dolt store is its own versioned repo
+		// (sync via `cusp dolt push`/`pull`) and the server runtime files are
+		// machine-local, so neither belongs in the host repo's git history.
+		const workspaceGitignore = `# Cusp workspace — the host repo's git tracks only metadata.json (and this file).
+# The Dolt store is its own versioned repo (sync it with 'cusp dolt push'/'pull'),
+# and the server runtime files are machine-local. Neither belongs in host git.
+dolt/
+dolt.corrupt.*
+dolt-server.pid
+dolt-server.port
+dolt-server.lock
+dolt-server.log
+active_changeset
+`
 		if err := os.WriteFile(filepath.Join(cuspDir, ".gitignore"),
-			[]byte("dolt-server.pid\ndolt-server.port\ndolt-server.lock\ndolt-server.log\nactive_changeset\n"), 0o644); err != nil {
+			[]byte(workspaceGitignore), 0o644); err != nil {
 			return err
 		}
 

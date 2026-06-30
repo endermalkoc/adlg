@@ -121,7 +121,7 @@ _None — all resolved (see below)._
   **many-to-many** (`junction_table` set). Only relationships between two known entities are emitted;
   N-ary junctions (e.g. `tutor_students`) are skipped and reported. Idempotent (deterministic ids).
 - **ER refinements from the tutor import** (validated by `cusp import tutor`, the read-only
-  parse-and-report adapter — `internal/importer/tutor`). Five pieces of source data had no clean
+  parse-and-report adapter — `src/cli/internal/importer/tutor`). Five pieces of source data had no clean
   home; the resolutions keep the core generic:
   - **`Domain.description`** — added (migration `0002`). The domain index gives every domain a
     one-line summary; generic, so it belongs in core.

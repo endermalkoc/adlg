@@ -150,7 +150,7 @@ What runs today. (For the full planned surface see the [illustrative table](#pla
 > **Prerequisite:** the [`dolt`](https://github.com/dolthub/dolt) binary on your `PATH`. `cusp init`
 > starts and manages a `dolt sql-server` for you — no separate database setup. To use a server you
 > run yourself, pass `--dsn` (or set `CUSP_DSN`). From a source checkout, every `cusp <cmd>` below
-> can be run as `go run ./cmd/cusp <cmd>`.
+> can be run as `go run -C src/cli ./cmd/cusp <cmd>`.
 
 ### Quickstart
 

@@ -10,6 +10,7 @@
 .dolt/
 
 # ── Go build output ────────────────────────────────────────────────────────
+# The Go module lives under src/cli/; `make build` still drops the binary here.
 /cusp
 /dist/
 *.exe
@@ -17,6 +18,15 @@
 *.out
 # VSCode / Delve debug binaries
 __debug_bin*
+
+# ── VS Code extension (src/extension/) build artifacts ─────────────────────
+# node_modules + bundled output are regenerable; the committed dev config
+# (src/extension/.vscode/launch.json + tasks.json) is NOT ignored — see below.
+node_modules/
+src/extension/dist/
+src/extension/out/
+*.vsix
+*.tsbuildinfo
 
 # ── Agent / editor local config ────────────────────────────────────────────
 # Personal, machine-local Claude Code settings — never shared. (Shared project
@@ -32,4 +42,6 @@ __debug_bin*
 Thumbs.db
 *.swp
 .idea/
-.vscode/
+# Only the repo-root .vscode/ (personal, Go-side settings) is ignored. The VS
+# Code extension's own src/extension/.vscode/ is committed — it IS the dev setup.
+/.vscode/

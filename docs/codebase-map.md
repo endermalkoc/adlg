@@ -27,19 +27,22 @@ item. Read alongside [ARCHITECTURE.md](ARCHITECTURE.md) (how it works) and
 
 ## Where things live
 
+The Go module now lives under `src/cli/` (the VS Code extension under `src/extension/`); the paths
+below are relative to `src/cli/`.
+
 | Path | What it is |
 |---|---|
-| `cmd/cusp/` | the CLI (cobra). `main.go` → `root.go` (flags, `connect`, `emit`); one file per group: `init`, `domain`, `spec`, `req`, `edge`, `changeset` |
-| `internal/app/` | **`Mutate`** — the command-contract wrapper **every** mutating command routes through; `validate.go` |
-| `internal/workspace/` | `.cusp` resolution, managed connect (owned/external/embedded), `ResolveActor`, active-changeset state, `WithRetryTx`, `Diff` |
-| `internal/store/` | entity CRUD as `Execer`-based free functions (Domain/Spec/Requirement/Edge so far) |
-| `internal/ids/` | PK minting — `New()` (ULID) and `Rel()` (deterministic uuidv5) |
-| `internal/enums/` | allowed enum value sets (the schema is VARCHAR by design; the app validates) |
-| `internal/storage/schema/` | migration runner + `migrations/0001_init.{up,down}.sql` (the DDL) |
-| `internal/storage/versioncontrolops/` | Dolt branch/commit/merge/diff over a `DBConn` — the changeset engine |
-| `internal/doltserver/` | manages the owned `dolt sql-server` (lifecycle, ports, recovery) |
-| `internal/configfile/`, `internal/config/` | config + DSN/server resolution |
-| `internal/storage/{dbproxy,doltutil,kvkeys,dberrors}`, `remotecache`, `doltremote`, `git`, `timeparsing`, `lockfile`, `atomicfile`, `debug` | salvaged infra (see [NOTICE](../NOTICE)) |
+| `src/cli/cmd/cusp/` | the CLI (cobra). `main.go` → `root.go` (flags, `connect`, `emit`); one file per group: `init`, `domain`, `spec`, `req`, `edge`, `changeset` |
+| `src/cli/internal/app/` | **`Mutate`** — the command-contract wrapper **every** mutating command routes through; `validate.go` |
+| `src/cli/internal/workspace/` | `.cusp` resolution, managed connect (owned/external/embedded), `ResolveActor`, active-changeset state, `WithRetryTx`, `Diff` |
+| `src/cli/internal/store/` | entity CRUD as `Execer`-based free functions (Domain/Spec/Requirement/Edge so far) |
+| `src/cli/internal/ids/` | PK minting — `New()` (ULID) and `Rel()` (deterministic uuidv5) |
+| `src/cli/internal/enums/` | allowed enum value sets (the schema is VARCHAR by design; the app validates) |
+| `src/cli/internal/storage/schema/` | migration runner + `migrations/0001_init.{up,down}.sql` (the DDL) |
+| `src/cli/internal/storage/versioncontrolops/` | Dolt branch/commit/merge/diff over a `DBConn` — the changeset engine |
+| `src/cli/internal/doltserver/` | manages the owned `dolt sql-server` (lifecycle, ports, recovery) |
+| `src/cli/internal/configfile/`, `src/cli/internal/config/` | config + DSN/server resolution |
+| `src/cli/internal/storage/{dbproxy,doltutil,kvkeys,dberrors}`, `remotecache`, `doltremote`, `git`, `timeparsing`, `lockfile`, `atomicfile`, `debug` | salvaged infra (see [NOTICE](../NOTICE)) |
 | `docs/entities/` | the authoritative data model (one file per layer + index/identifiers/enums/decisions) |
 
 ## Picking up a ROADMAP item — where to look
@@ -49,17 +52,17 @@ item. Read alongside [ARCHITECTURE.md](ARCHITECTURE.md) (how it works) and
 | Remote sync (`cusp dolt push/pull`) | `versioncontrolops/remotes.go`, `remotecache` | `cmd/bd/dolt.go`, `federation.go` |
 | Generate (Markdown/HTML) | net-new; read via `store` / `versioncontrolops` | *(none — beads exports JSONL, not docs)* |
 | Batch add (`--file` JSON/CSV) | extend the `add` commands; loop store funcs inside one `app.Mutate` | `cmd/bd/create.go` (`--file`/`--graph`), `cmd/bd/batch.go` |
-| Generic import (JSON/CSV) | net-new `internal/import` core (field-mapping → entities, via the contract) | `cmd/bd/import.go` (pattern) |
+| Generic import (JSON/CSV) | net-new `src/cli/internal/import` core (field-mapping → entities, via the contract) | `cmd/bd/import.go` (pattern) |
 | Source adapters (first: tutor) | net-new adapters on the generic core | `cmd/bd/import.go`; tutor source at `../tutor/docs` |
 | `check` / `impact` | traverse `edge` + FKs; ARCHITECTURE §Validation/§Impact | beads `check`/`validate`, `internal/tracker` |
-| Agent setup (Claude Code, …) | net-new `cmd/cusp` + a `setup` pkg | `cmd/bd/setup/{claude,codex,cursor,…}.go` |
+| Agent setup (Claude Code, …) | net-new `src/cli/cmd/cusp` + a `setup` pkg | `cmd/bd/setup/{claude,codex,cursor,…}.go` |
 | MCP server | net-new (Go MCP SDK) | `integrations/beads-mcp` (Python — design ref only) |
-| New entity verb (`test`, `milestone`, …) | add to `internal/store`, route through `app.Mutate`, satisfy the contract | `cmd/bd/<verb>.go` |
+| New entity verb (`test`, `milestone`, …) | add to `src/cli/internal/store`, route through `app.Mutate`, satisfy the contract | `cmd/bd/<verb>.go` |
 | DB maintenance (gc/compact/backup) | `versioncontrolops` (gc/compact/flatten lifted) | `cmd/bd/{gc,compact,backup}.go` |
 
 ## How to add a command (the short version)
 
-1. New file in `cmd/cusp/` with a cobra command.
+1. New file in `src/cli/cmd/cusp/` with a cobra command.
 2. Read path: `connect(ctx)` → `store.List…(ctx, ws.DB())` → `emit`.
 3. Write path: `connect(ctx)` → `app.Mutate(ctx, ws, MutateOpts{Summary, Changeset: flagChangeset,
    Actor: flagActor, Validate}, func(ctx, w){ store.Add…(ctx, w.Tx, …); w.MarkDirty("table") })`.
@@ -68,6 +71,6 @@ item. Read alongside [ARCHITECTURE.md](ARCHITECTURE.md) (how it works) and
 
 ## Build / run / test
 
-See [CLAUDE.md](../CLAUDE.md). TL;DR: `go build ./...` · `go vet ./...` · `go test ./...`; needs
+See [CLAUDE.md](../CLAUDE.md). TL;DR (Go module under `src/cli/`): `go build -C src/cli ./...` · `go vet -C src/cli ./...` · `go test -C src/cli ./...`; needs
 the `dolt` binary on PATH; `cusp init` bootstraps a workspace, then the verbs work against the
 managed server.

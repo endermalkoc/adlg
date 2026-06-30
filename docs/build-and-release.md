@@ -13,17 +13,17 @@ cross-platform releases.
 
 | File | Purpose |
 |---|---|
-| [cmd/cusp/version.go](../cmd/cusp/version.go) | `cusp version` (+ `--version`, `--json`). Version/commit/date are injected at build time; falls back to embedded VCS build info for `go install` builds. |
-| [cmd/cusp/upgrade.go](../cmd/cusp/upgrade.go) + [internal/selfupdate](../internal/selfupdate) | `cusp upgrade [version]` — self-update: download the release archive for this OS/arch, checksum-verify against `checksums.txt`, and replace the binary in place. `--check` reports availability only. Mirrors `install.sh`'s asset/checksum conventions. |
-| [.goreleaser.yaml](../.goreleaser.yaml) | Cross-builds linux/darwin/windows × amd64/arm64, archives (`tar.gz`, `zip` on Windows), `checksums.txt`, changelog. |
-| [.github/workflows/ci.yml](../.github/workflows/ci.yml) | On PR/push: `go vet` + `go build` + `go test`, plus a GoReleaser snapshot **dry-run** so release breakage is caught before tagging. |
+| [src/cli/cmd/cusp/version.go](../src/cli/cmd/cusp/version.go) | `cusp version` (+ `--version`, `--json`). Version/commit/date are injected at build time; falls back to embedded VCS build info for `go install` builds. |
+| [src/cli/cmd/cusp/upgrade.go](../src/cli/cmd/cusp/upgrade.go) + [src/cli/internal/selfupdate](../src/cli/internal/selfupdate) | `cusp upgrade [version]` — self-update: download the release archive for this OS/arch, checksum-verify against `checksums.txt`, and replace the binary in place. `--check` reports availability only. Mirrors `install.sh`'s asset/checksum conventions. |
+| [.goreleaser.yaml](../.goreleaser.yaml) | Cross-builds linux/darwin/windows × amd64/arm64 from the module under `src/cli/` (`dir: ./src/cli`), archives (`tar.gz`, `zip` on Windows), `checksums.txt`, changelog. |
+| [.github/workflows/ci.yml](../.github/workflows/ci.yml) | On PR/push (run in `src/cli/`): `go vet` + `go build` + `go test`, plus a GoReleaser snapshot **dry-run** so release breakage is caught before tagging. |
 | [.github/workflows/release.yml](../.github/workflows/release.yml) | On a `v*` tag push: runs GoReleaser → publishes a GitHub Release. |
 | [install.sh](../install.sh) | `curl \| sh` installer: detects OS/arch, resolves the latest tag, downloads + verifies the checksum, installs the binary. |
 | [Makefile](../Makefile) | Local dev: `make build / install / test / vet / tidy / snapshot / release-check / help`. |
 
 ## Version stamping
 
-The build metadata lives in [cmd/cusp/version.go](../cmd/cusp/version.go) as package-level
+The build metadata lives in [src/cli/cmd/cusp/version.go](../src/cli/cmd/cusp/version.go) as package-level
 `version` / `commit` / `date` vars (default `version = "dev"`). They are set three ways, in
 order of precedence:
 
@@ -47,9 +47,12 @@ global `--json` flag).
 
 ## Local development
 
+The Go module lives under `src/cli/` (the VS Code extension under `src/extension/`). `make` targets
+run from the repo root; raw `go` commands take `-C src/cli` (e.g. `go test -C src/cli ./...`).
+
 ```sh
 make build          # → ./cusp for the host platform (CGO-free, version-stamped)
-make test           # go test ./...
+make test           # go test -C src/cli ./...
 make snapshot       # full cross-platform build into dist/, no publish (needs goreleaser)
 make release-check  # validate .goreleaser.yaml
 make help           # list all targets
@@ -72,8 +75,8 @@ the GitHub Release with all assets attached. It uses the Actions-provided `GITHU
 secrets to configure**. Tags like `v0.1.0-rc1` publish as pre-releases automatically.
 
 > GoReleaser refuses to publish from a **dirty git tree**. Make sure no ignored/generated
-> files are staged when you tag. The `before` hook uses `go mod download` (not `go mod tidy`)
-> specifically so the release run can't dirty `go.mod`/`go.sum`.
+> files are staged when you tag. The `before` hook runs `go mod download` (not `go mod tidy`) in
+> `src/cli/` specifically so the release run can't dirty `src/cli/go.mod`/`src/cli/go.sum`.
 
 ### One-time setup
 

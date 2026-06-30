@@ -13,7 +13,7 @@ data model), and [docs/command-contract.md](command-contract.md) (the workflow e
   req/spec/domain/entity/glossary-term + `edge ls`/`delete` + `section delete` — is done; see
   [CHANGELOG.md](CHANGELOG.md).)
 - **`cusp config get/set`** — a general typed `config get/set` over the lifted
-  `internal/config`/`configfile` (Dolt server settings). (The workspace `generate` config —
+  `src/cli/internal/config`/`configfile` (Dolt server settings). (The workspace `generate` config —
   `config show` + `config generate enable/disable/add/remove/sync` — is done.)
 - **Per-kind edge type policy** — which endpoint *types* a given edge kind may link. Left generic for
   now; graph integrity (endpoint resolution, self-loop/cycle rejection) is done.
@@ -26,7 +26,7 @@ data model), and [docs/command-contract.md](command-contract.md) (the workflow e
 |---|---|---|
 | **Remote sync — remaining** | `cusp dolt clone`, federation (peers) | push/pull/remote/fetch + `cusp sync` are **done** (see [CHANGELOG.md](CHANGELOG.md)). **Remaining:** `cusp dolt clone` (bootstrap a workspace from a remote — distinct flow, no existing `.cusp`) and federation/peers. |
 | **Batch add** | `cusp <entity> add --file <f>` and/or `cusp batch <f>` — bulk-create entities from a **JSON/CSV** file in Cusp's own shape, in **one changeset/commit** | adapt beads' `bd create --file`/`--graph`; rides the `Mutate` wrapper so the whole batch is one transaction + one Dolt commit. |
-| **Generic import** | `cusp import --format json\|csv <f>` — ingest **arbitrary external** JSON/CSV and map columns/fields into the schema via a mapping spec | **TODO.** The staging core (`internal/importer`: `Graph`/`Report`/idempotent `Apply`) exists from the tutor work; still needed is the external-shape → field-mapping front end (distinct from batch add). Routes through the contract. |
+| **Generic import** | `cusp import --format json\|csv <f>` — ingest **arbitrary external** JSON/CSV and map columns/fields into the schema via a mapping spec | **TODO.** The staging core (`src/cli/internal/importer`: `Graph`/`Report`/idempotent `Apply`) exists from the tutor work; still needed is the external-shape → field-mapping front end (distinct from batch add). Routes through the contract. |
 | **Source adapters — remaining** | `cusp import <source>` — pluggable per-source adapters on the staging core | **`tutor` done** (see [CHANGELOG.md](CHANGELOG.md) — read-only report + `--apply`, Domain→Entity). **Remaining:** `EntityAttribute`/`EntityRelationship` need a non-prose source or an enrichment pass (they live in entity-doc prose, not a structured form); test-management data is covered by the **Qase adapter** below. Future adapters reuse `importer.Apply`. |
 | **Qase adapter (tests)** | `cusp import qase <export\|--token>` — ingest a Qase project into the [testing layer](entities/testing.md) (test cases **and** test runs) | **TODO.** The testing schema is *already modeled on Qase*, so the mapping is near 1:1: suites → `TestSuite` (tree via `parent_id`), cases → `TestCase` (+ `TestStep`, + FR citations → `requirement_test_case` coverage), configurations → `Configuration`, runs → `TestRun` (+ `test_run_configuration`), results → `TestResult` — whose **deterministic** `uuidv5(run_id, test_case_id, configuration_id)` PK makes re-import idempotent. Qase's own **Plan** and **SharedStep** are intentionally omitted ([decision](entities/testing.md)). Source is the **Qase API** (token) or a **Qase export** (CSV/XML); a plain **JUnit/Qase run report** can feed just `TestRun`/`TestResult`. Read-only report + `--apply`; reuses the staging core + `app.Mutate`. The **Notion adapter** (done; see [CHANGELOG.md](CHANGELOG.md)) is the reference pattern. |
 | **Export** | `cusp export` — JSONL snapshot (git-friendly, diffable) | beads' model; useful for backups/interop alongside Dolt history. |
@@ -192,7 +192,7 @@ shared glossary.
 
 ## Testing & CI
 
-Today only `internal/ids` is unit-tested; everything else was verified **manually** against real
+Today only `src/cli/internal/ids` is unit-tested; everything else was verified **manually** against real
 Dolt (`init` → `add` → commit → changeset round-trip). Codify that:
 
 - **Unit tests** (fast, no DB) — pure logic: `ids` (✅), `enums` + `app` validation, `store` SQL +
@@ -206,7 +206,7 @@ Dolt (`init` → `add` → commit → changeset round-trip). Codify that:
   beads' `internal/testutil/integration`.
 - **Embedded-driver e2e** — the in-process `dolthub/driver/v2` test was reverted (needs cgo +
   `libicu-dev`); reintroduce behind a build tag (e.g. `-tags dolt_e2e`) once CI guarantees ICU.
-- **CI** — run `go build ./...` · `go vet ./...` · `go test ./...` on every push; gate the
+- **CI** — run `go build -C src/cli ./...` · `go vet -C src/cli ./...` · `go test -C src/cli ./...` on every push; gate the
   integration suite on `dolt` availability (PATH or testcontainers).
 
 ## Deliberately NOT carried from beads
@@ -227,10 +227,10 @@ Dolt (`init` → `add` → commit → changeset round-trip). Codify that:
 - **Embedded mode needs cgo + ICU** (`libicu-dev`) to build. Owned/external (pure-Go) is the
   default; embedded is recognized but deferred. Revisit shipping embedded-by-default vs.
   requiring the `dolt` binary.
-- **Lifted utilities now consumed:** `internal/git` (workspace), `internal/storage/dberrors`
-  (schema runner). Still orphaned: `internal/timeparsing` (pull in when a command takes dates).
+- **Lifted utilities now consumed:** `src/cli/internal/git` (workspace), `src/cli/internal/storage/dberrors`
+  (schema runner). Still orphaned: `src/cli/internal/timeparsing` (pull in when a command takes dates).
 - **`fr_key`** is an app-maintained column, not a SQL generated column (cross-table generation
   isn't possible in Dolt) — keep the store deriving it on write.
 - **Concurrency:** same-branch number allocation is safe (`FOR UPDATE` + retry); cross-branch
   FR-number convergence is the documented merge-renumber policy (identifiers.md).
-- **`go mod tidy`** upkeep as imports change (currently 12 direct deps — `goldmark` added for the HTML renderer).
+- **`go mod -C src/cli tidy`** upkeep as imports change (currently 12 direct deps — `goldmark` added for the HTML renderer).

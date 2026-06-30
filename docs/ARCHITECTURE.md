@@ -65,16 +65,16 @@ ways of connecting to the same database**, selected by configuration:
   separate runtime" promise and is the intended default.
 - **Owned** (`ServerModeOwned`) — Cusp spawns and supervises its own `dolt sql-server`
   subprocess (requires the `dolt` binary on `PATH`), talking to it over the MySQL wire
-  protocol. Implemented by [`internal/doltserver`](../internal/doltserver): cross-platform port
+  protocol. Implemented by [`src/cli/internal/doltserver`](../src/cli/internal/doltserver): cross-platform port
   detection, PID/lock files, log rotation, and manifest/corruption recovery.
 - **External** (`ServerModeExternal`) — connect to a `dolt sql-server` someone else runs.
 
 **Warm proxy daemon.** Because Dolt cold-start is expensive per invocation, a long-running
-proxy ([`internal/storage/dbproxy`](../internal/storage/dbproxy)) keeps the database hot and
+proxy ([`src/cli/internal/storage/dbproxy`](../src/cli/internal/storage/dbproxy)) keeps the database hot and
 proxies CLI commands to it — the mechanism behind a future `*_proxied_server` command path.
 
 These packages are domain-agnostic: the dependency on beads' issue-domain `storage` package
-was **severed to a minimal shim** ([`internal/storage/storage.go`](../internal/storage/storage.go))
+was **severed to a minimal shim** ([`src/cli/internal/storage/storage.go`](../src/cli/internal/storage/storage.go))
 holding only `RemoteInfo` and an opaque `DoltStorage` handle, preserving the generic-core
 invariant. See [NOTICE](../NOTICE) for attribution and the full salvaged-package list.
 
@@ -152,38 +152,41 @@ server modes](#storage-engine--server-modes)). Rationale:
 
 (The former TypeScript/Bun alternative is moot now that Go infrastructure has landed.)
 
-Module path: `github.com/endermalkoc/cusp` (Go 1.26.2). `go.mod`/`go.sum` were brought over
-from beads and still need a `go mod tidy` to prune dependencies down to the salvaged subset.
+Module path: `github.com/endermalkoc/cusp` (Go 1.26.2). `src/cli/go.mod`/`src/cli/go.sum` were brought over
+from beads and still need a `go mod -C src/cli tidy` to prune dependencies down to the salvaged subset.
 
 ## Repository layout
 
-Source layout mirrors beads (the salvage came from there). The Dolt infrastructure plus a
-first domain-layer vertical slice (`ids` → `store` → `cmd/cusp`) are in place:
+Source layout mirrors beads (the salvage came from there). The Go module now lives under
+`src/cli/` (the VS Code extension under `src/extension/`); the paths below are relative to
+`src/cli/`. The Dolt infrastructure plus a first domain-layer vertical slice
+(`ids` → `store` → `cmd/cusp`) are in place:
 
 ```
-cmd/cusp/            CLI (cobra): init · domain/spec/req/edge add|ls · changeset start/diff/submit/merge
-internal/
-  app/               the mutation wrapper (Mutate) every command routes through (the command contract)
-  workspace/         .cusp resolution + managed connect (owned/external/embedded) + actor + active-changeset + retry + diff
-  enums/             allowed enum value sets (schema is VARCHAR by design; app validates)
-  ids/               PK minting: ULID (authored) + deterministic uuidv5 (relationships)
-  store/             Cusp entity store — executor-based (runs on the wrapper's *sql.Tx / a pinned conn)
-  doltserver/        owned-mode dolt sql-server supervision (lifecycle, recovery, logs)
-  storage/
-    storage.go       severance shim: the DoltStorage handle (composed of the contracts below)
-    version_control.go versioned.go remote.go sync.go federation.go
-    compaction.go history_viewer.go   VC / remote / sync / federation contracts + value types
-    schema/          migration runner + migrations/0001_init.{up,down}.sql (the Cusp DDL)
-    versioncontrolops/ Dolt branch/commit/merge/clone/gc/flatten/backup over a DBConn
-    kvkeys/          config-key prefixes (merge auto-resolution policy)
-    dberrors/        Dolt/SQL error classification
-    dbproxy/         warm proxy daemon (pidfile, proxy, server, util)
-    doltutil/        DSN building, remote listing, connection close
-  remotecache/       clone/pull/push cache for Dolt remotes
-  doltremote/        remote-URL normalization
-  git/               git plumbing (repo root, worktree detection)
-  timeparsing/       CLI date parsing (+6h, tomorrow, RFC3339)
-  config/ configfile/ debug/ lockfile/ atomicfile/   leaf helpers
+src/cli/
+  cmd/cusp/          CLI (cobra): init · domain/spec/req/edge add|ls · changeset start/diff/submit/merge
+  internal/
+    app/               the mutation wrapper (Mutate) every command routes through (the command contract)
+    workspace/         .cusp resolution + managed connect (owned/external/embedded) + actor + active-changeset + retry + diff
+    enums/             allowed enum value sets (schema is VARCHAR by design; app validates)
+    ids/               PK minting: ULID (authored) + deterministic uuidv5 (relationships)
+    store/             Cusp entity store — executor-based (runs on the wrapper's *sql.Tx / a pinned conn)
+    doltserver/        owned-mode dolt sql-server supervision (lifecycle, recovery, logs)
+    storage/
+      storage.go       severance shim: the DoltStorage handle (composed of the contracts below)
+      version_control.go versioned.go remote.go sync.go federation.go
+      compaction.go history_viewer.go   VC / remote / sync / federation contracts + value types
+      schema/          migration runner + migrations/0001_init.{up,down}.sql (the Cusp DDL)
+      versioncontrolops/ Dolt branch/commit/merge/clone/gc/flatten/backup over a DBConn
+      kvkeys/          config-key prefixes (merge auto-resolution policy)
+      dberrors/        Dolt/SQL error classification
+      dbproxy/         warm proxy daemon (pidfile, proxy, server, util)
+      doltutil/        DSN building, remote listing, connection close
+    remotecache/       clone/pull/push cache for Dolt remotes
+    doltremote/        remote-URL normalization
+    git/               git plumbing (repo root, worktree detection)
+    timeparsing/       CLI date parsing (+6h, tomorrow, RFC3339)
+    config/ configfile/ debug/ lockfile/ atomicfile/   leaf helpers
 ```
 
 The version-control tier was lifted **with surgery**: `versioncontrolops` was decoupled
@@ -201,7 +204,7 @@ Working end-to-end (verified against real Dolt):
   deterministic-PK enforcement verified.
 - **`cusp init`** — creates `.cusp/`, starts a managed (owned) `dolt sql-server`, runs
   `MigrateUp`, seeds an actor, and records the initial Dolt commit.
-- **Command contract** — every mutating command routes through `internal/app.Mutate`:
+- **Command contract** — every mutating command routes through `src/cli/internal/app.Mutate`:
   managed connect → resolve changeset/`main` target → validate → transaction → mint → commit
   as a real Dolt commit with actor + message (working set left clean). Bad input fails before
   any write.
@@ -217,7 +220,7 @@ server, and the generic import. See [ROADMAP.md](ROADMAP.md) and [docs/command-c
 
 The schema is validated end-to-end against real Dolt (32 tables / 43 FKs / 17 UNIQUEs, with
 FK/UNIQUE/deterministic-PK enforcement verified), and a first vertical slice is live: the
-`cusp` CLI creates Domain/Spec/Requirement/Edge through `internal/store` into a running
+`cusp` CLI creates Domain/Spec/Requirement/Edge through `src/cli/internal/store` into a running
 `dolt sql-server` (so writes appear immediately in a connected UI like Dolt Workbench). ULID
 minting and the deterministic relationship-PK both work (re-adding an edge converges to one row).
 

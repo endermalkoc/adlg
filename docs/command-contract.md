@@ -29,7 +29,7 @@ the reason every `bd` verb behaves consistently.
 
 Every mutating command MUST, in order:
 
-1. **Connect** through resolved config — DSN / DB location from `internal/config`, never
+1. **Connect** through resolved config — DSN / DB location from `src/cli/internal/config`, never
    hardcoded; via the managed connection (the `cusp init`-created DB / `doltserver`). *(gap #1, #9)*
 2. **Resolve the write target** — the ambient active changeset or `--changeset <name>` (its Dolt
    branch); otherwise `main` (auto-commit). *(changeset model — decisions.md)*
@@ -66,7 +66,7 @@ Every mutating command MUST, in order:
 
 Every mutating command accepts the global `--dry-run` flag: the body runs and validates inside a
 transaction, then rolls back — nothing is committed (the CLI prints a `[dry-run] … no changes were
-committed` note). It is injected once by the `runMutate` CLI wrapper (`cmd/cusp/root.go`), not per
+committed` note). It is injected once by the `runMutate` CLI wrapper (`src/cli/cmd/cusp/root.go`), not per
 command, over `app.Mutate`'s existing `DryRun`.
 
 Failures map to documented **exit codes** (and, under `--json`, a structured error envelope
@@ -80,12 +80,12 @@ Failures map to documented **exit codes** (and, under `--json`, a structured err
 | 3    | `not_found`    | a named entity does not exist (`app.NotFound`/`NotFoundErr`) |
 | 4    | `dangling_ref` | an inline `[[TYPE:key]]` cross-reference does not resolve (`app.DanglingError`) |
 
-Errors are tagged at their source via `app.CodedError`; `Execute` (`cmd/cusp/root.go`) maps the
+Errors are tagged at their source via `app.CodedError`; `Execute` (`src/cli/cmd/cusp/root.go`) maps the
 code and renders the envelope. Uncategorized errors stay exit 1.
 
 ## Current status (the slice vs the contract)
 
-The wrapper exists (`internal/app.Mutate`) and the slice now routes through it. `domain`/`spec`/
+The wrapper exists (`src/cli/internal/app.Mutate`) and the slice now routes through it. `domain`/`spec`/
 `req`/`edge` `add` satisfy the mutating-command contract — managed connect, changeset/main
 target resolution, validation, transaction, mint, attribution + timestamps, and a real Dolt
 commit with actor+message. `cusp init` bootstraps the workspace; `cusp changeset

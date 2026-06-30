@@ -11,11 +11,15 @@ project_name: cusp
 before:
   hooks:
     # `download` (not `tidy`) so the working tree stays clean — GoReleaser
-    # refuses to publish a release from a dirty git state.
-    - go mod download
+    # refuses to publish a release from a dirty git state. The Go module lives
+    # under src/cli/, so run the hook there.
+    - cmd: go mod download
+      dir: ./src/cli
 
 builds:
   - id: cusp
+    # The Go module root (go.mod, cmd/, internal/) lives under src/cli/.
+    dir: ./src/cli
     main: ./cmd/cusp
     binary: cusp
     env:

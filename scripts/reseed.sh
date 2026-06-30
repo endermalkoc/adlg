@@ -31,7 +31,7 @@ command -v dolt >/dev/null || { echo "reseed: 'dolt' not found on PATH" >&2; exi
 [ -d "$CORPUS/specs" ] || { echo "reseed: corpus not found at $CORPUS (no specs/)" >&2; exit 1; }
 
 echo "==> building cusp from $REPO"
-go build -C "$REPO" -o "$WORKSPACE/cusp" ./cmd/cusp
+go build -C "$REPO/src/cli" -o "$WORKSPACE/cusp" ./cmd/cusp
 
 # Free the port: stop a dolt server still bound to it (managed or hand-started), so the
 # data dir lock is released before init --force wipes and rebinds. Only kills dolt.

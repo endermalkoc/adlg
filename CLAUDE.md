@@ -11,7 +11,7 @@ agents alike. See [README.md](README.md) and [ARCHITECTURE.md](docs/ARCHITECTURE
 
 **Status:** early implementation. The Dolt infrastructure (salvaged from
 [beads](https://github.com/steveyegge/beads), MIT), the **schema** (`0001_init`), **`cusp init`**,
-the **command contract** (`internal/app.Mutate`), the `domain`/`spec`/`req`/`edge` verbs, and the
+the **command contract** (`src/cli/internal/app.Mutate`), the `domain`/`spec`/`req`/`edge` verbs, and the
 **changeset (PR) flow** are built and verified against real Dolt. Still to come: generation,
 `check`/`impact`, remote sync, the MCP server, import — see [ROADMAP.md](docs/ROADMAP.md). The
 authoritative artifacts remain the [data model](docs/entities/index.md) and
@@ -77,7 +77,10 @@ organized and current:
 - **Project docs live in [docs/](docs/).** Markdown documentation belongs under `docs/` — the only
   docs kept at the repo root are the conventional entrypoints [README.md](README.md),
   [CLAUDE.md](CLAUDE.md), and [NOTICE](NOTICE). Don't add new doc files to the root; put them in
-  `docs/` and add a pointer to the [Repository layout](#repository-layout) list below.
+  `docs/` and add a pointer to the [Repository layout](#repository-layout) list below. (A code
+  subpackage may carry its own conventional `README.md` — e.g.
+  [`src/extension/README.md`](src/extension/README.md) — that's a package readme co-located with
+  the code it documents, not project documentation, so it stays put rather than moving to `docs/`.)
 - **[ROADMAP.md](docs/ROADMAP.md) holds only what's *next*; completed work moves to
   [docs/CHANGELOG.md](docs/CHANGELOG.md).** When a roadmap item ships, move it out of the roadmap and
   record it in the changelog. For a partially-done item, split it: the finished part goes to the
@@ -95,30 +98,36 @@ organized and current:
   beads reference, reading order, and where to pick up each roadmap item
 - [docs/command-contract.md](docs/command-contract.md) — the workflow every command follows
 - [NOTICE](NOTICE) — attribution for the Dolt infrastructure salvaged from beads
-- `internal/` — the salvaged Dolt infrastructure (see
-  [ARCHITECTURE.md](docs/ARCHITECTURE.md#repository-layout) for the package map)
+- `src/cli/` — the Go module producing the `cusp` CLI: commands in `src/cli/cmd/cusp/`, the
+  salvaged Dolt infrastructure + engine packages under `src/cli/internal/` (see
+  [ARCHITECTURE.md](docs/ARCHITECTURE.md#repository-layout) for the package map). Raw `go`
+  commands take `-C src/cli`; `make` targets run from the repo root.
+- `src/extension/` — the VS Code extension (TypeScript): the human changeset-review surface, a
+  third front-end over `Mutate` (talks to `cusp` via a transport-agnostic client — CLI now, MCP
+  later). Has its own [README](src/extension/README.md) with the dev loop.
 - **Reference clones (not in this repo, read-only):** **beads** at `/home/ender/repos/misc/beads`
-  (`../../misc/beads`) — the salvage source for `internal/`'s Dolt infra ([NOTICE](NOTICE) lists
+  (`../../misc/beads`) — the salvage source for `src/cli/internal/`'s Dolt infra ([NOTICE](NOTICE) lists
   what was lifted); the **tutor corpus** at `../tutor/docs/specs` / `analysis` — the first import
   target and the source the schema was modeled against.
 
 ## Tech stack (Go — locked)
 
 Go single static binary + an MCP server. Module `github.com/endermalkoc/cusp`, Go 1.26.2.
+The Go module lives under `src/cli/`; the VS Code extension lives under `src/extension/`.
 Storage is Dolt, reached three ways (embedded / owned / external) — see
 [ARCHITECTURE.md](docs/ARCHITECTURE.md#storage-engine--server-modes).
 
 ## Working with the salvaged `internal/` code
 
-The `internal/` packages were lifted from beads with import paths rewritten and beads'
+The `src/cli/internal/` packages were lifted from beads with import paths rewritten and beads'
 issue-domain dependency severed to a minimal shim
-([`internal/storage/storage.go`](internal/storage/storage.go)). When extending them:
+([`src/cli/internal/storage/storage.go`](src/cli/internal/storage/storage.go)). When extending them:
 
 - **Keep the core generic.** Do not reintroduce a dependency on a domain (issue/spec/etc.)
   model inside `doltserver`, `dbproxy`, `doltutil`, `remotecache`, or `doltremote`. Widen
   `DoltStorage` in the shim instead; that's where Cusp's real store contract grows.
-- `go.mod`/`go.sum` came over from beads wholesale — run **`go mod tidy`** to prune to the
-  salvaged subset before relying on the dependency list.
+- `src/cli/go.mod`/`src/cli/go.sum` came over from beads wholesale — run **`go mod -C src/cli tidy`**
+  to prune to the salvaged subset before relying on the dependency list.
 ## Command contract — every CLI command follows it
 
 **Every command must satisfy [docs/command-contract.md](docs/command-contract.md).** The
@@ -132,8 +141,10 @@ is a **Resolved decision** in [docs/entities/decisions.md](docs/entities/decisio
 
 ## Build / run
 
-- Build: `go build ./...` · vet: `go vet ./...` · test: `go test ./...` (all green).
-- CLI: `go run ./cmd/cusp <cmd>` (or `go build -o cusp ./cmd/cusp`). `cusp init` creates `.cusp/`
+- The Go module lives under `src/cli/` (the VS Code extension under `src/extension/`); `make` targets
+  run from the repo root, and raw `go` commands take `-C src/cli`.
+- Build: `go build -C src/cli ./...` · vet: `go vet -C src/cli ./...` · test: `go test -C src/cli ./...` (all green).
+- CLI: `go run -C src/cli ./cmd/cusp <cmd>` (or `make build` to produce `./cusp`). `cusp init` creates `.cusp/`
   and auto-starts a managed `dolt sql-server` (needs the **`dolt` binary on PATH**); `--dsn` /
   `CUSP_DSN` connects to an external server instead.
 - Package layout: see [ARCHITECTURE.md](docs/ARCHITECTURE.md#repository-layout).

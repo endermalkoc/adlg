@@ -1,4 +1,8 @@
 BINARY  := cusp
+# The Go module lives under src/cli/ (the TypeScript extension lives under
+# src/extension/). All go commands run with `-C $(CLI)`; build output still
+# lands at the repo root via an absolute -o path.
+CLI     := src/cli
 PKG     := ./cmd/cusp
 
 # Version metadata baked into the binary (mirrors what GoReleaser injects).
@@ -10,29 +14,29 @@ LDFLAGS := -s -w \
 	-X main.commit=$(COMMIT) \
 	-X main.date=$(DATE)
 
-GO_BUILD := CGO_ENABLED=0 go build -ldflags "$(LDFLAGS)"
+GO_BUILD := CGO_ENABLED=0 go build -C $(CLI) -ldflags "$(LDFLAGS)"
 
 .PHONY: all build install test vet tidy fmt clean snapshot release-check help
 
 all: build ## Build the binary (default)
 
 build: ## Build ./cusp for the host platform
-	$(GO_BUILD) -o $(BINARY) $(PKG)
+	$(GO_BUILD) -o $(CURDIR)/$(BINARY) $(PKG)
 
 install: ## go install the binary into GOBIN/GOPATH
-	CGO_ENABLED=0 go install -ldflags "$(LDFLAGS)" $(PKG)
+	CGO_ENABLED=0 go install -C $(CLI) -ldflags "$(LDFLAGS)" $(PKG)
 
 test: ## Run all tests
-	go test ./...
+	go test -C $(CLI) ./...
 
 vet: ## Run go vet
-	go vet ./...
+	go vet -C $(CLI) ./...
 
 tidy: ## Prune go.mod/go.sum to what's actually used
-	go mod tidy
+	go mod -C $(CLI) tidy
 
 fmt: ## Format all Go source
-	go fmt ./...
+	go fmt -C $(CLI) ./...
 
 clean: ## Remove build output
 	rm -rf $(BINARY) dist/

@@ -11,13 +11,18 @@ permissions:
 jobs:
   build-test:
     runs-on: ubuntu-latest
+    # The Go module lives under src/cli/; run every go step there.
+    defaults:
+      run:
+        working-directory: src/cli
     steps:
       - uses: actions/checkout@v4
 
       - uses: actions/setup-go@v5
         with:
-          go-version-file: go.mod
+          go-version-file: src/cli/go.mod
           cache: true
+          cache-dependency-path: src/cli/go.sum
 
       - name: Vet
         run: go vet ./...
@@ -38,9 +43,12 @@ jobs:
 
       - uses: actions/setup-go@v5
         with:
-          go-version-file: go.mod
+          go-version-file: src/cli/go.mod
           cache: true
+          cache-dependency-path: src/cli/go.sum
 
+      # GoReleaser runs from the repo root and reads .goreleaser.yaml, whose
+      # build `dir: ./src/cli` points it at the module.
       - uses: goreleaser/goreleaser-action@v6
         with:
           version: "~> v2"
