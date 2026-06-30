@@ -34,7 +34,7 @@ data model), and [docs/command-contract.md](command-contract.md) (the workflow e
 | **Validation & analysis — remaining** | richer traceability (orphan-FR/coverage rollups), `impact` over `ent_relationship`, `adlg doctor` (health + auto-fix), drift detection | **`adlg check`** (inline-ref + cycle integrity) and **`adlg impact <ref>`** (graph traversal, `--transitive`) first slices are **done** (see [CHANGELOG.md](CHANGELOG.md)). **Remaining:** richer traceability (orphan-FR/coverage rollups), `impact` over `ent_relationship` too, `doctor`/`drift` (adapt beads patterns; we have `schema.CheckForwardDrift`-style hooks). |
 | **Query / inspect — optional extensions** | a higher-level `query` DSL, a standalone `adlg diff <from> <to>` | `adlg sql`/`stats`/`search`/`log` are **done** (see [CHANGELOG.md](CHANGELOG.md)). These extensions are optional, not blocking. |
 | **Agent integration (CLI-first)** | `adlg setup` installs the **skill + instructions** (CLAUDE.md/AGENTS.md/`.cursor/…`) **+ a `prime`-style SessionStart hook** that injects live state (the open changeset, ready work) into context — for **Claude Code**, Codex, Cursor, Gemini, Aider, opencode. The **MCP server** (`adlg serve --mcp`) is **secondary** | **requested.** Mirror beads' `cmd/bd/{setup,prime}` + hooks. **CLI + skill + hooks is the primary path** for shell-capable agents: beads' own [beads-mcp README] measures it at **~1–2k context tokens vs ~10–50k for MCP tool schemas**, and it reuses the single `Mutate` write path the command contract already mandates (no second surface to keep in sync). **MCP is demoted to a fallback** for shell-less hosts (Claude Desktop) — a thin adapter over `Mutate`, not a second source of truth. Valued, kept in the pocket, not required. |
-| **DB maintenance** | `adlg backup`/`restore`, `gc` (Dolt GC), `compact`/`flatten` (history compaction) | Infra lifted in `versioncontrolops` (gc/compact/flatten); wire the CLI. |
+| **DB maintenance** | `adlg backup`/`restore`, `gc` (standalone Dolt GC) | **`adlg flatten` + `adlg dolt compact` (history compaction) DONE** (see [CHANGELOG.md](CHANGELOG.md)) — both GC after squashing. **Remaining:** `backup`/`restore` and a standalone `gc` command (infra lifted in `versioncontrolops`; wire the CLI). |
 | **CLI polish** | **help system** (rich help + examples, `help-all` overview), shell completion | **requested (help).** Cobra gives base help/completion; add per-command examples and a top-level overview. |
 
 ## Modules & plugins (separable layers)
@@ -166,6 +166,7 @@ Cross-cutting beads features (not issue-domain), and ADLG's status:
 | beads | ADLG status |
 |---|---|
 | `dolt push/pull/remote`, `sync`, `federation` | push/pull/remote/fetch + `sync` **DONE**; `clone` + federation remaining |
+| `dolt start/stop/status` (server lifecycle), `branch` | **DONE** — `adlg dolt start/stop/status` + `adlg branch ls/create/delete/checkout` (see [CHANGELOG.md](CHANGELOG.md)) |
 | `export` (JSONL) | **roadmap (Export)** |
 | `import` | **roadmap** — Generic import + Source adapters (`tutor`, `notion` done; `qase` planned) |
 | `batch` (bulk create) | **roadmap (Batch add — JSON/CSV)** |
@@ -173,7 +174,7 @@ Cross-cutting beads features (not issue-domain), and ADLG's status:
 | `search` | **DONE** — Query/inspect |
 | `backup`/`restore` | **roadmap (DB maintenance)** |
 | `doctor`, `drift`, `preflight` | **roadmap (Validation & analysis)** |
-| `gc`, `compact`, `flatten` | infra lifted → **roadmap (DB maintenance)** |
+| `gc`, `compact`, `flatten` | `compact` + `flatten` **DONE** (see [CHANGELOG.md](CHANGELOG.md)); standalone `gc` command remaining → **roadmap (DB maintenance)** |
 | `setup` (agent install) + `prime`/hooks | **roadmap (Agent integration)** — **primary** agent path (skill + instructions + SessionStart `prime` hook) |
 | MCP server | **roadmap (Agent integration)** — **secondary**, shell-less hosts only (Claude Desktop); thin adapter over `Mutate`. CLI+skill+hooks is primary |
 | `config` (get/set) | **Finish the command contract** |

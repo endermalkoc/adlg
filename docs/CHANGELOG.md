@@ -194,6 +194,29 @@ pre-release.
   against a `file://` remote: add/ls/push/fetch, a divergent commit pulled back + merged, and a local
   edit round-tripped via `sync`.
 
+### Server, branches & DB maintenance
+
+- **Dolt server lifecycle — `adlg dolt start/stop/status`** ([dolt.go](../cmd/adlg/dolt.go)).
+  `start` starts (or adopts, idempotently) the managed owned server; `stop` gracefully shuts it
+  down (flush → SIGTERM → SIGKILL, `--force` to skip the wait); `status` reports mode + pid/port/
+  data-dir/logs (text or `--json`). `start`/`stop` refuse when the workspace targets an external
+  server (`--dsn`/`$ADLG_DSN` or an explicit port). Closes the gap where owned mode could auto-start
+  a server but offered no clean stop — wraps the lifted `doltserver.Start/StopWithForce/IsRunning`.
+- **Raw branch escape hatch — `adlg branch ls/create/delete/checkout`**
+  ([branch.go](../cmd/adlg/branch.go), [app/branch.go](../internal/app/branch.go)). The low-level
+  view beneath the changeset model: `ls` lists Dolt branches (marks the active target, tags
+  `changeset/*`), `create` branches off the active target, `delete` removes one (refuses `main` and
+  the active target), `checkout` retargets the ambient read/write branch (reusing the active-changeset
+  pointer; `main` clears it). For the tracked PR workflow use `adlg changeset`; these are for
+  diagnostics and manual surgery.
+- **History maintenance — `adlg flatten` + `adlg dolt compact`**
+  ([flatten.go](../cmd/adlg/flatten.go), [app/maintenance.go](../internal/app/maintenance.go)).
+  `flatten` squashes all Dolt history into one snapshot (irreversible; `--force`/`--dry-run`);
+  `dolt compact --days N` squashes commits older than the window into one base, cherry-picking the
+  recent ones on top (`--force`/`--dry-run`), driving the lifted `versioncontrolops.Compact` from the
+  commit log. Both GC afterward (best-effort). Verified end-to-end against real Dolt: a 7-commit
+  history collapses to root + 1 snapshot with all `req_domain` data intact.
+
 ### Query & inspect
 
 - **Query / inspect — `sql`/`stats`/`search`/`log`** ([query.go](../cmd/adlg/query.go)).
