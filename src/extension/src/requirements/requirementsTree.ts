@@ -1,7 +1,7 @@
 import * as vscode from "vscode";
-import { CuspClient, DomainNode, ReqNode } from "../cusp/client";
+import { CuspClient, DomainNode, SpecNode, ReqNode } from "../cusp/client";
 
-type Kind = "domain" | "spec" | "group" | "req";
+type Kind = "domain" | "spec" | "category" | "story" | "group" | "req" | "section";
 
 // A node in a STABLE tree built once per load. Stable object identity + a stable `id` are what
 // let TreeView.reveal() walk from an element up through getParent() and expand/select it.
@@ -11,8 +11,10 @@ interface Node {
   label: string;
   description?: string;
   tooltip?: string;
-  docPath?: string; // spec + req (a req carries its spec's doc path)
-  anchor?: string; // req: frKey.toLowerCase()
+  icon?: string;
+  docPath?: string; // spec / story / req / section — all open the spec doc
+  anchor?: string; // req: frKey.toLowerCase() (scroll to an id)
+  find?: string; // story / section: heading text to scroll to (scroll by text)
   openTitle?: string; // webview panel title when opened
   parent?: Node;
   children: Node[];
@@ -37,9 +39,10 @@ export class RequirementsTreeProvider implements vscode.TreeDataProvider<Node> {
   }
 
   getTreeItem(node: Node): vscode.TreeItem {
+    const leaf = node.kind === "req" || node.kind === "story" || node.kind === "section";
     const item = new vscode.TreeItem(
       node.label,
-      node.kind === "req" ? vscode.TreeItemCollapsibleState.None : vscode.TreeItemCollapsibleState.Collapsed,
+      leaf ? vscode.TreeItemCollapsibleState.None : vscode.TreeItemCollapsibleState.Collapsed,
     );
     item.id = node.id;
     item.description = node.description;
@@ -47,13 +50,13 @@ export class RequirementsTreeProvider implements vscode.TreeDataProvider<Node> {
       item.tooltip = node.kind === "req" ? new vscode.MarkdownString(node.tooltip) : node.tooltip;
     }
     item.contextValue = `cusp-${node.kind}`;
-    item.iconPath = new vscode.ThemeIcon(iconFor(node.kind));
+    item.iconPath = new vscode.ThemeIcon(node.icon ?? iconFor(node.kind));
     if (node.docPath) {
-      // Specs open at the top; FRs open scrolled to their anchor.
+      // Specs open at the top; FRs scroll to their anchor; stories/sections scroll to their heading.
       item.command = {
         command: "cusp.openSpecDoc",
         title: "Open",
-        arguments: [{ docPath: node.docPath, anchor: node.anchor, title: node.openTitle }],
+        arguments: [{ docPath: node.docPath, anchor: node.anchor, find: node.find, title: node.openTitle }],
       };
     }
     return item;
@@ -67,8 +70,9 @@ export class RequirementsTreeProvider implements vscode.TreeDataProvider<Node> {
     return node.parent;
   }
 
-  // find locates a spec (by doc path) or, when an anchor is given, the FR under it — the element
-  // handed to TreeView.reveal so a link/back-forward navigation follows in the tree.
+  // find locates a spec (by doc path) or, when an anchor is given, the FR under it (searched
+  // recursively, since FRs now sit under the "Functional Requirements" category and its groups) —
+  // the element handed to TreeView.reveal so a link/back-forward navigation follows in the tree.
   async find(docPath: string, anchor?: string): Promise<Node | undefined> {
     const roots = await this.ensureRoots();
     for (const domain of roots) {
@@ -76,7 +80,7 @@ export class RequirementsTreeProvider implements vscode.TreeDataProvider<Node> {
         if (spec.docPath !== docPath) {
           continue;
         }
-        return anchor ? findReq(spec, anchor) ?? spec : spec;
+        return anchor ? findByAnchor(spec, anchor) ?? spec : spec;
       }
     }
     return undefined;
@@ -89,7 +93,7 @@ export class RequirementsTreeProvider implements vscode.TreeDataProvider<Node> {
     if (!this.loading) {
       this.loading = this.client
         .requirementsTree()
-        .then((domains) => (this.roots = buildNodes(domains)))
+        .then((domains) => (this.roots = (domains ?? []).map(buildDomain)))
         .catch((err) => {
           vscode.window.showErrorMessage(`Cusp: failed to load requirements — ${messageOf(err)}`);
           this.loading = undefined;
@@ -100,57 +104,110 @@ export class RequirementsTreeProvider implements vscode.TreeDataProvider<Node> {
   }
 }
 
-function buildNodes(domains: DomainNode[]): Node[] {
-  return (domains ?? []).map((d) => {
-    const domain: Node = { kind: "domain", id: `domain:${d.slug}`, label: d.name, children: [] };
-    domain.children = (d.specs ?? []).map((s) => {
-      const specTitle = s.title || s.prefix || s.docPath;
-      const spec: Node = {
-        kind: "spec",
-        id: `spec:${s.docPath}`,
-        label: s.prefix || s.title,
-        description: s.prefix ? s.title : undefined,
-        tooltip: s.docPath,
-        docPath: s.docPath,
-        openTitle: specTitle,
-        parent: domain,
-        children: [],
-      };
-      const mkReq = (r: ReqNode, parent: Node): Node => ({
-        kind: "req",
-        id: `req:${r.frKey}`,
-        label: r.frKey,
-        description: r.statement,
-        tooltip: `**${r.frKey}**\n\n${r.statement}`,
-        docPath: s.docPath,
-        anchor: r.frKey.toLowerCase(),
-        openTitle: `${r.frKey} — ${specTitle}`,
-        parent,
-        children: [],
-      });
-      const groups: Node[] = (s.groups ?? []).map((g) => {
-        const group: Node = { kind: "group", id: `group:${s.docPath}#${g.title}`, label: g.title, parent: spec, children: [] };
-        group.children = (g.requirements ?? []).map((r) => mkReq(r, group));
-        return group;
-      });
-      const ungrouped = (s.requirements ?? []).map((r) => mkReq(r, spec));
-      spec.children = [...groups, ...ungrouped];
-      return spec;
-    });
-    return domain;
-  });
+function buildDomain(d: DomainNode): Node {
+  const domain: Node = { kind: "domain", id: `domain:${d.slug}`, label: d.name, children: [] };
+  domain.children = (d.specs ?? []).map((s) => buildSpec(s, domain));
+  return domain;
 }
 
-function findReq(spec: Node, anchor: string): Node | undefined {
-  for (const child of spec.children) {
-    if (child.kind === "req" && child.anchor === anchor) {
-      return child;
-    }
-    if (child.kind === "group") {
-      const hit = child.children.find((r) => r.anchor === anchor);
-      if (hit) {
-        return hit;
-      }
+function buildSpec(s: SpecNode, domain: Node): Node {
+  const specTitle = s.title || s.prefix || s.docPath;
+  const spec: Node = {
+    kind: "spec",
+    id: `spec:${s.docPath}`,
+    label: specTitle, // "Add Student [ADDS]" — prefix bracketed in the description
+    description: s.title && s.prefix ? `[${s.prefix}]` : undefined,
+    tooltip: s.docPath,
+    docPath: s.docPath,
+    openTitle: specTitle,
+    parent: domain,
+    children: [],
+  };
+
+  const cats: Node[] = [];
+
+  // User Stories.
+  const stories = s.stories ?? [];
+  if (stories.length) {
+    const cat = categoryNode("User Stories", `cat:${s.docPath}:stories`, "account", spec);
+    cat.children = stories.map((st, i) => ({
+      kind: "story" as Kind,
+      id: `story:${s.docPath}:${i}`,
+      label: st.title,
+      docPath: s.docPath,
+      find: st.title, // scroll to the "User Story N - <title> …" heading
+      openTitle: `${st.title} — ${specTitle}`,
+      parent: cat,
+      children: [],
+    }));
+    cats.push(cat);
+  }
+
+  // Functional Requirements: groups (each with its FRs) + ungrouped FRs.
+  const groups = s.groups ?? [];
+  const ungrouped = s.requirements ?? [];
+  if (groups.length || ungrouped.length) {
+    const cat = categoryNode("Functional Requirements", `cat:${s.docPath}:frs`, "checklist", spec);
+    const mkReq = (r: ReqNode, parent: Node): Node => ({
+      kind: "req",
+      id: `req:${r.frKey}`,
+      label: r.frKey,
+      description: r.statement,
+      tooltip: `**${r.frKey}**\n\n${r.statement}`,
+      docPath: s.docPath,
+      anchor: r.frKey.toLowerCase(),
+      openTitle: `${r.frKey} — ${specTitle}`,
+      parent,
+      children: [],
+    });
+    const groupNodes: Node[] = groups.map((g) => {
+      const gn: Node = {
+        kind: "group",
+        id: `group:${s.docPath}#${g.title}`,
+        label: g.title,
+        parent: cat,
+        children: [],
+      };
+      gn.children = (g.requirements ?? []).map((r) => mkReq(r, gn));
+      return gn;
+    });
+    cat.children = [...groupNodes, ...ungrouped.map((r) => mkReq(r, cat))];
+    cats.push(cat);
+  }
+
+  // Other: prose sections.
+  const sections = s.sections ?? [];
+  if (sections.length) {
+    const cat = categoryNode("Other", `cat:${s.docPath}:other`, "note", spec);
+    cat.children = sections.map((sec) => ({
+      kind: "section" as Kind,
+      id: `section:${s.docPath}:${sec.key}`,
+      label: sec.title,
+      docPath: s.docPath,
+      find: sec.title, // scroll to the section heading
+      openTitle: `${sec.title} — ${specTitle}`,
+      parent: cat,
+      children: [],
+    }));
+    cats.push(cat);
+  }
+
+  spec.children = cats;
+  return spec;
+}
+
+function categoryNode(label: string, id: string, icon: string, parent: Node): Node {
+  return { kind: "category", id, label, icon, parent, children: [] };
+}
+
+function findByAnchor(node: Node, anchor: string): Node | undefined {
+  if (node.anchor === anchor) {
+    return node;
+  }
+  for (const child of node.children) {
+    const hit = findByAnchor(child, anchor);
+    if (hit) {
+      return hit;
     }
   }
   return undefined;
@@ -162,10 +219,16 @@ function iconFor(kind: Kind): string {
       return "folder";
     case "spec":
       return "file";
+    case "category":
+      return "list-tree";
+    case "story":
+      return "person";
     case "group":
       return "symbol-namespace";
+    case "section":
+      return "note";
     default:
-      return "symbol-field";
+      return "symbol-field"; // req
   }
 }
 

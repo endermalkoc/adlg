@@ -28,13 +28,26 @@ export interface GroupNode {
   requirements: ReqNode[];
 }
 
-/** A spec: its FR groups, plus any ungrouped requirements directly under it. */
+/** A user story — a subitem of the spec's "User Stories" bucket. */
+export interface StoryNode {
+  title: string;
+}
+
+/** A prose section — a subitem of the spec's "Other" bucket. */
+export interface SectionNode {
+  key: string;
+  title: string;
+}
+
+/** A spec, grouped into User Stories / Functional Requirements / Other. */
 export interface SpecNode {
   prefix?: string;
   title: string;
   docPath: string;
+  stories: StoryNode[];
   groups: GroupNode[];
-  requirements: ReqNode[];
+  requirements: ReqNode[]; // ungrouped FRs
+  sections: SectionNode[]; // prose sections → "Other"
 }
 
 /** A domain and its specs — a root of the requirements tree. */
