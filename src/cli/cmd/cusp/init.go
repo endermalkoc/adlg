@@ -117,13 +117,17 @@ var initCmd = &cobra.Command{
 		}
 		// .cusp/.gitignore controls what the HOST repo's git tracks. Only metadata.json
 		// (and this file) are committable; the Dolt store is its own versioned repo
-		// (sync via `cusp dolt push`/`pull`) and the server runtime files are
-		// machine-local, so neither belongs in the host repo's git history.
+		// (sync via `cusp dolt push`/`pull`), the generated Markdown/HTML are
+		// regenerable build artifacts (invariant: never hand-edited, never committed),
+		// and the server runtime files are machine-local — none belong in host git.
 		const workspaceGitignore = `# Cusp workspace — the host repo's git tracks only metadata.json (and this file).
-# The Dolt store is its own versioned repo (sync it with 'cusp dolt push'/'pull'),
-# and the server runtime files are machine-local. Neither belongs in host git.
+# Everything else is regenerable or machine-local, and never hand-edited:
+#   dolt/          the Dolt store — its own versioned repo ('cusp dolt push'/'pull')
+#   generated/     generated Markdown/HTML build artifacts ('cusp generate' output)
+#   dolt-server.*  the managed dolt server's runtime files
 dolt/
 dolt.corrupt.*
+generated/
 dolt-server.pid
 dolt-server.port
 dolt-server.lock
