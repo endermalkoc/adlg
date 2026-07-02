@@ -62,6 +62,17 @@ func runMutate(cmd *cobra.Command, ws *workspace.Workspace, o app.MutateOpts, bo
 	return app.Mutate(cmd.Context(), ws, o, body)
 }
 
+// runMutateOnMain is runMutate for the review-workflow rows (Comment/Review) that must live on
+// `main`, never on a changeset branch (docs/entities/review.md) — otherwise the review record
+// would merge away with the change it describes. It pins the target to `main` regardless of the
+// active changeset / --changeset flag, while still honoring --actor and --dry-run.
+func runMutateOnMain(cmd *cobra.Command, ws *workspace.Workspace, o app.MutateOpts, body func(context.Context, *app.Write) error) error {
+	o.Changeset = "main"
+	o.Actor = flagActor
+	o.DryRun = flagDryRun
+	return app.Mutate(cmd.Context(), ws, o, body)
+}
+
 // Execute runs the CLI. On failure it maps the error to a documented exit code (see
 // docs/command-contract.md) and, under --json, emits a structured error envelope on
 // stdout; otherwise a plain "error: …" line on stderr.

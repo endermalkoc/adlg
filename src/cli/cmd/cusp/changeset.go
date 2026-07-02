@@ -10,6 +10,7 @@ import (
 
 	"github.com/spf13/cobra"
 
+	"github.com/endermalkoc/cusp/internal/app"
 	"github.com/endermalkoc/cusp/internal/enums"
 	"github.com/endermalkoc/cusp/internal/ids"
 	"github.com/endermalkoc/cusp/internal/storage/versioncontrolops"
@@ -22,6 +23,8 @@ var changesetCmd = &cobra.Command{
 	Aliases: []string{"cs"},
 	Short:   "Manage changesets — PR-like branches that bundle edits across entities",
 }
+
+var changesetDiffEntities bool
 
 var slugRe = regexp.MustCompile(`[^a-z0-9]+`)
 
@@ -36,6 +39,16 @@ func currentHead(ctx context.Context, conn *sql.Conn) (string, error) {
 	var h string
 	err := conn.QueryRowContext(ctx, "SELECT commit_hash FROM dolt_log ORDER BY date DESC LIMIT 1").Scan(&h)
 	return h, err
+}
+
+// branchExists reports whether a Dolt branch of that name currently exists (a merged/abandoned
+// changeset's branch may have been deleted while its rev_changeset row lives on).
+func branchExists(ctx context.Context, conn *sql.Conn, branch string) (bool, error) {
+	var n int
+	if err := conn.QueryRowContext(ctx, "SELECT COUNT(*) FROM dolt_branches WHERE name=?", branch).Scan(&n); err != nil {
+		return false, err
+	}
+	return n > 0, nil
 }
 
 // resolveChangeset returns the changeset branch from an arg, else the active one.
@@ -91,7 +104,10 @@ var changesetStartCmd = &cobra.Command{
 			id, title, "", authorID, enums.ChangesetDraft, branch, base, now, now); err != nil {
 			return fmt.Errorf("recording changeset: %w", err)
 		}
-		if err := versioncontrolops.StageAndCommit(ctx, conn, map[string]bool{"rev_changeset": true},
+		// Stage rev_actor too: --actor may have seeded a new actor row (above) that
+		// rev_changeset.author_id references; staging only rev_changeset would fail the FK or leave
+		// the actor unstaged. DOLT_ADD of an unchanged rev_actor is a no-op.
+		if err := versioncontrolops.StageAndCommit(ctx, conn, map[string]bool{"rev_changeset": true, "rev_actor": true},
 			"open changeset "+branch, actor.CommitAuthorString()); err != nil {
 			return err
 		}
@@ -124,11 +140,52 @@ var changesetDiffCmd = &cobra.Command{
 			return err
 		}
 		defer conn.Close()
-		var base string
-		if err := conn.QueryRowContext(ctx, "SELECT base_commit FROM `rev_changeset` WHERE branch=?", branch).Scan(&base); err != nil {
-			return fmt.Errorf("unknown changeset %q: %w", branch, err)
+		cs, ok, err := store.GetChangesetByBranch(ctx, conn, branch)
+		if err != nil {
+			return err
 		}
-		diffs, err := workspace.Diff(ctx, conn, base, branch)
+		if !ok {
+			return app.NotFound("changeset", branch)
+		}
+		base := cs.BaseCommit
+		// The head ref is the branch while it exists; once a changeset is merged or abandoned the
+		// branch may be gone, so fall back to the recorded head/merge commit (both survive branch
+		// deletion), keeping merged/closed changesets reviewable.
+		head := branch
+		branchLive, err := branchExists(ctx, conn, branch)
+		if err != nil {
+			return err
+		}
+		if !branchLive {
+			head = cs.HeadCommit
+			if head == "" {
+				head = cs.MergeCommit
+			}
+			if head == "" {
+				return app.NotFoundErr(fmt.Errorf("changeset %q has no branch to diff (abandoned before submit)", branch))
+			}
+		}
+		// --entities: per-entity/field diff (for a review surface anchoring comments to a row/field).
+		if changesetDiffEntities {
+			// While the branch is live, move onto it so the label index resolves entities added in
+			// the changeset (they aren't on main yet); once it's gone, labels resolve from main.
+			if branchLive {
+				if err := versioncontrolops.CheckoutBranch(ctx, conn, branch); err != nil {
+					return err
+				}
+			}
+			ents, err := app.EntityDiffs(ctx, conn, base, head)
+			if err != nil {
+				return err
+			}
+			if flagJSON {
+				emit(ents, "")
+				return nil
+			}
+			fmt.Print(printEntityDiffs(branch, ents))
+			return nil
+		}
+		diffs, err := workspace.Diff(ctx, conn, base, head)
 		if err != nil {
 			return err
 		}
@@ -229,9 +286,10 @@ var changesetMergeCmd = &cobra.Command{
 		if len(conflicts) > 0 {
 			tables := make([]string, 0, len(conflicts))
 			for _, c := range conflicts {
-				tables = append(tables, c.NodeID)
+				tables = append(tables, c.Field) // GetConflicts records the conflicting table in Field
 			}
-			return fmt.Errorf("merge of %s has conflicts in: %s (resolve and retry)", branch, strings.Join(tables, ", "))
+			return fmt.Errorf("merge of %s has conflicts in: %s — aborted; main is unchanged (resolve on the branch, then retry)",
+				branch, strings.Join(tables, ", "))
 		}
 		mergeCommit, err := currentHead(ctx, conn)
 		if err != nil {
@@ -344,7 +402,28 @@ var changesetLsCmd = &cobra.Command{
 	},
 }
 
+// printEntityDiffs renders a per-entity/field diff as a readable tree.
+func printEntityDiffs(branch string, ents []app.EntityDiff) string {
+	if len(ents) == 0 {
+		return branch + ": no entity changes vs base\n"
+	}
+	var b strings.Builder
+	fmt.Fprintf(&b, "%s vs base:\n", branch)
+	for _, e := range ents {
+		ref := e.SubjectRef
+		if ref == "" {
+			ref = e.SubjectType + ":" + e.SubjectID
+		}
+		fmt.Fprintf(&b, "  %-8s %s\n", e.ChangeType, ref)
+		for _, f := range e.Fields {
+			fmt.Fprintf(&b, "      %s: %q → %q\n", f.Name, oneLineComment(f.Base), oneLineComment(f.Head))
+		}
+	}
+	return b.String()
+}
+
 func init() {
+	changesetDiffCmd.Flags().BoolVar(&changesetDiffEntities, "entities", false, "per-entity/field diff (for review anchoring) instead of the table-level summary")
 	changesetCmd.AddCommand(changesetStartCmd, changesetDiffCmd, changesetSubmitCmd, changesetMergeCmd, changesetAbandonCmd, changesetLsCmd)
 	rootCmd.AddCommand(changesetCmd)
 }

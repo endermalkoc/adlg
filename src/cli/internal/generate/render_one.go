@@ -23,6 +23,23 @@ func RenderSpecDoc(ctx context.Context, x store.Execer, specID, docPath, format 
 	if err != nil {
 		return "", err
 	}
+	return renderLoadedDoc(m, docPath, format)
+}
+
+// RenderEntityDoc is the entity analog of RenderSpecDoc: it renders a single entity's document
+// on demand. docPath is the entity's canonical .md path (store.EntityDocPath).
+func RenderEntityDoc(ctx context.Context, x store.Execer, entityID, docPath, format string) (string, error) {
+	m, err := LoadDocs(ctx, x, nil, []string{entityID})
+	if err != nil {
+		return "", err
+	}
+	return renderLoadedDoc(m, docPath, format)
+}
+
+// renderLoadedDoc picks the document at docPath out of the Model's rendered files and returns it
+// in the requested format ("md"/"markdown" → raw Markdown; "html" → the embedded, inline-CSS
+// page). Shared by RenderSpecDoc and RenderEntityDoc.
+func renderLoadedDoc(m *Model, docPath, format string) (string, error) {
 	mdFiles, err := newMarkdownRenderer(m).Render(m)
 	if err != nil {
 		return "", err
@@ -35,7 +52,7 @@ func RenderSpecDoc(ctx context.Context, x store.Execer, specID, docPath, format 
 		}
 	}
 	if target == nil {
-		return "", fmt.Errorf("no rendered document for spec at %s", docPath)
+		return "", fmt.Errorf("no rendered document at %s", docPath)
 	}
 
 	switch strings.ToLower(format) {

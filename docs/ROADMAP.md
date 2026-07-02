@@ -129,9 +129,19 @@ verbs to write them.
 
 **Step 1 (near-term, unblocks the whole loop):** wire `Review`/`Comment` into **CLI + MCP** — comment on
 subject+locator, list/resolve threads, set verdict. Small, contract-shaped, closes the *agent* side
-immediately, and is a prerequisite for every surface below.
+immediately, and is a prerequisite for every surface below. **CLI slice DONE** — `cusp comment`
+(add/ls/show/resolve/reopen/edit/delete), `cusp review` (+`ls`), and per-entity `cusp changeset diff
+--entities`, all writing the review rows to `main` (see [CHANGELOG.md](CHANGELOG.md)). **Remaining:** the
+**MCP** surface (deferred with the rest of Agent integration — no server yet; the new `store` funcs are the
+reusable seam for a thin adapter over `Mutate`).
 
-**Step 2 (human review UX) — decided: a VS Code extension is the primary surface.**
+**Step 2 (human review UX) — decided: a VS Code extension is the primary surface.** *First slice built* —
+the changeset tree expands to its per-entity diff, and reviewing a changeset opens VS Code's **native diff
+editor** (`vscode.diff`) over the affected spec rendered at base (`main`) vs head, with **native Comments
+API** threads anchored to a requirement via `^fr-key` block anchors (add/reply/resolve → `cusp comment`, set
+verdict → `cusp review`); spec **and entity** docs are diffed (a section-only edit rolls up to its doc), via
+`cusp spec render`/`cusp entity render`; see [CHANGELOG.md](CHANGELOG.md). Remaining polish: base at the exact
+`base_commit` (today `main`), `deliverable`/`test_case` docs, and richer thread navigation.
 
 - **VS Code extension (chosen).** Reuse VS Code's native **diff editor** + **Comments API** (the same API the
   GitHub PR extension uses for gutter threads + a comments panel), talking to `cusp` over CLI/MCP. The
@@ -158,6 +168,33 @@ immediately, and is a prerequisite for every surface below.
 **Decision:** Step 1 (wire `Review`/`Comment` into CLI+MCP) → **VS Code extension** as the primary human review
 surface, covering editor + browser via vscode.dev/code-server; CLI/TUI as the terminal floor; GitHub federation
 as optional interop; the from-scratch web app deferred unless a non-editor reviewer surface is demanded.
+
+**Review surface — remaining follow-ups** (the CLI verbs + native-diff extension slice shipped; see
+[CHANGELOG.md](CHANGELOG.md)):
+
+- **MCP surface for `Review`/`Comment`.** The CLI slice of Step 1 is done; the MCP half is still pending
+  (deferred with [Agent integration](#core-features) — no server yet). The new `store` review funcs are the
+  reusable seam for a thin adapter over `Mutate`; no second source of truth.
+- **Diff base at the exact `base_commit`.** The extension renders the base side at `main` (a "diff vs main"),
+  not the changeset's recorded `base_commit`. Correct when `main` hasn't advanced since the branch forked;
+  otherwise it shows unrelated `main` changes too. Needs `spec render`/`entity render --at <commit-or-ref>`
+  (render `AS OF` a commit) so the base side is the true merge base. (`cusp changeset diff` already resolves
+  the head from the branch, else the recorded `head_commit`/`merge_commit`, so **merged** changesets stay
+  reviewable and an **abandoned-before-submit** one fails cleanly with a coded `not_found`.)
+- **Diff `deliverable` / `test_case` docs.** Only spec and entity docs are diffed today (requirement/spec/
+  user_story → owning spec; entity/entity-section → entity). `deliverable`/`test_case` `EntityDiff` rows carry
+  no `docRef` because there's no single-doc renderer for them yet — add `deliverable`/`testcase render` (or a
+  planning/testing doc render) and populate `docRef`.
+- **Roll up `ent_relationship` edits.** Section/child roll-up to the owning doc covers `ent_entity_section`
+  and the spec child tables; an entity-relationship-only edit (`ent_relationship`) doesn't yet surface the
+  affected entity docs. Extend the doc-coverage pass in `app/diff.go` (both endpoints).
+- **Abandoned-after-submit rendering.** `changeset diff` recovers via the recorded `head_commit`, but the
+  extension's doc render still passes the (deleted) branch name to `--changeset`, so a *submitted-then-
+  abandoned* changeset can't render its head side. Either render the head `AS OF head_commit` too, or mark
+  abandoned changesets non-reviewable in the tree.
+- **True base/head diff editor for prose fidelity + richer thread navigation.** Comments anchor via `^fr-key`
+  block anchors (requirements) or whole-doc (entities); deepen to field/section-level locators and a
+  comments-panel jump list.
 
 ## "What am I missing vs beads?" — feature survey
 

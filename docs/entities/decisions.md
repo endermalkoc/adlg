@@ -148,6 +148,19 @@ _None — all resolved (see below)._
   is computed from Dolt (`base_commit`→`head_commit`), never duplicated into tables; the
   `Changeset`/`Review`/`Comment` rows live on `main`, not inside the changeset branch. This
   deliberately differs from beads (which auto-commits each operation).
+  - **The `comment`/`review` verbs pin `main` regardless of the active changeset.** Because those
+    rows must live on `main`, `cusp comment`/`cusp review` route through the shared mutation wrapper
+    with the target forced to `main` (a `runMutateOnMain` sibling of `runMutate`), not the ambient
+    active changeset. A comment's `--subject` is resolved on the **changeset branch** (where a
+    changeset-new entity lives), then written to `main`; the resolved `subject_id` is a stable uuid,
+    so the anchor survives the merge.
+  - **A review verdict moves the changeset status.** `cusp review --verdict` upserts one `Review`
+    per reviewer (deterministic id over `changeset`+`reviewer`) *and* sets the changeset's `status`:
+    `approve→approved`, `request_changes→changes_requested`, `deny→denied`. `merged`/`closed` remain
+    owned by the explicit `changeset merge`/`abandon` verbs, so a verdict never merges or closes on
+    its own. `Review.verdict` and `Comment.subject_type` are **closed** enums (hard-validated).
+    Per-entity/field review anchoring is served by `cusp changeset diff --entities` (an `EntityDiff`
+    list: subject + change-type + per-field base→head), reusing the auto-gen `dolt_diff` plumbing.
 - **Cross-references are inline `[[TYPE:key]]` links, dual-formed into [`EntityRef`](requirements.md#entityref)**
   (the Cross-references feature; see [ROADMAP.md](../ROADMAP.md)). An author/agent writes a
   canonical token in any text field — `[[REQ:ATT-FR-012]]`, optional display

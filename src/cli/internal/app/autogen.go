@@ -25,6 +25,9 @@ var nonRenderTables = map[string]bool{
 	"pub_external_ref": true,
 	"req_entity_ref":   true,
 	"rev_actor":        true,
+	"rev_comment":      true,
+	"rev_review":       true,
+	"rev_changeset":    true,
 }
 
 // localSpecTables hold a spec's content keyed directly by spec_id; a change confined to them

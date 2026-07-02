@@ -281,6 +281,46 @@ func ListEntities(ctx context.Context, x Execer) ([]EntityRow, error) {
 	return out, rows.Err()
 }
 
+// EntityRelRow is one of an entity's relationships to another entity (either direction), resolved
+// to the other endpoint's name + doc path (for display and navigation) plus the cardinality.
+type EntityRelRow struct {
+	OtherName    string
+	OtherDocPath string
+	Cardinality  string
+	Outgoing     bool // true: this entity → other; false: other → this entity
+}
+
+// ListEntityRelationships returns an entity's ent_relationship rows in both directions, each
+// resolved to the other endpoint's name + doc path, ordered by that name.
+func ListEntityRelationships(ctx context.Context, x Execer, entityID string) ([]EntityRelRow, error) {
+	rows, err := x.QueryContext(ctx, `
+		SELECT e2.name, COALESCE(e2.path,''), COALESCE(r.cardinality,''), 1
+		FROM `+"`ent_relationship`"+` r JOIN `+"`ent_entity`"+` e2 ON e2.id = r.to_entity_id
+		WHERE r.from_entity_id = ?
+		UNION ALL
+		SELECT e1.name, COALESCE(e1.path,''), COALESCE(r.cardinality,''), 0
+		FROM `+"`ent_relationship`"+` r JOIN `+"`ent_entity`"+` e1 ON e1.id = r.from_entity_id
+		WHERE r.to_entity_id = ?
+		ORDER BY 1`, entityID, entityID)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var out []EntityRelRow
+	for rows.Next() {
+		var r EntityRelRow
+		var subdir string
+		var outgoing int
+		if err := rows.Scan(&r.OtherName, &subdir, &r.Cardinality, &outgoing); err != nil {
+			return nil, err
+		}
+		r.OtherDocPath = EntityDocPath(subdir, r.OtherName)
+		r.Outgoing = outgoing == 1
+		out = append(out, r)
+	}
+	return out, rows.Err()
+}
+
 // SectionTypeRow is one curated section-type lookup row: the title/level/position
 // that drive how a section of this type renders. Shared shape across the spec and entity
 // vocabularies (req_spec_section_type / ent_entity_section_type).

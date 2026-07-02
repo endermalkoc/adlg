@@ -41,6 +41,32 @@ func Status(ctx context.Context, db DBConn) (*storage.Status, error) {
 	return status, rows.Err()
 }
 
+// DirtyWorkingSet returns the distinct tables with uncommitted changes (staged or unstaged) in the
+// current working set — for a preflight cleanliness check before a mutation, so per-table staging
+// cannot sweep up changes the command did not make.
+func DirtyWorkingSet(ctx context.Context, db DBConn) ([]string, error) {
+	st, err := Status(ctx, db)
+	if err != nil {
+		return nil, err
+	}
+	seen := map[string]bool{}
+	var tables []string
+	for _, e := range append(append([]storage.StatusEntry{}, st.Staged...), st.Unstaged...) {
+		if e.Table != "" && !seen[e.Table] {
+			seen[e.Table] = true
+			tables = append(tables, e.Table)
+		}
+	}
+	return tables, nil
+}
+
+// DiscardWorkingSet resets the working set to HEAD, discarding all uncommitted changes.
+// Best-effort — used to clean up a command's own writes after its Dolt commit fails, leaving the
+// branch clean rather than wedged with uncommitted changes.
+func DiscardWorkingSet(ctx context.Context, db DBConn) {
+	_, _ = db.ExecContext(ctx, "CALL DOLT_RESET('--hard')")
+}
+
 // Log returns recent commit history up to limit entries.
 // If limit is 0 or negative, all entries are returned.
 func Log(ctx context.Context, db DBConn, limit int) ([]storage.CommitInfo, error) {
@@ -91,16 +117,39 @@ func CommitExists(ctx context.Context, db DBConn, commitHash string) (bool, erro
 }
 
 // Merge merges the named branch into the current branch. The author string
-// should be formatted as "Name <email>". Returns any merge conflicts.
+// should be formatted as "Name <email>". On conflicts — or any merge failure —
+// it ABORTS the merge so the target branch is never left in a conflicted/dirty
+// state, then returns the conflicting tables (with a nil error) so the caller
+// can report them and the operator can retry. db must be a single pinned
+// session.
 func Merge(ctx context.Context, db DBConn, branch, author string) ([]storage.Conflict, error) {
-	_, err := db.ExecContext(ctx, "CALL DOLT_MERGE('--author', ?, ?)", author, branch)
-	if err != nil {
-		// Check if the error is due to conflicts.
-		conflicts, conflictErr := GetConflicts(ctx, db)
-		if conflictErr == nil && len(conflicts) > 0 {
-			return conflicts, nil
-		}
-		return nil, fmt.Errorf("merge branch %s: %w", branch, err)
+	// Cleanliness before the merge gates abortMerge's hard-reset fallback.
+	preClean := workingSetClean(ctx, db)
+
+	// Let a conflicted merge LAND in the working set instead of autocommit-rolling it back, so we
+	// can read the conflicting tables and then abort cleanly. Reset after, so these flags don't
+	// linger on a connection returned to the pool.
+	if _, err := db.ExecContext(ctx, "SET @@dolt_allow_commit_conflicts = 1"); err != nil {
+		return nil, fmt.Errorf("prepare merge of %s: %w", branch, err)
+	}
+	if _, err := db.ExecContext(ctx, "SET @@dolt_force_transaction_commit = 1"); err != nil {
+		return nil, fmt.Errorf("prepare merge of %s: %w", branch, err)
+	}
+	defer func() {
+		_, _ = db.ExecContext(ctx, "SET @@dolt_allow_commit_conflicts = 0")
+		_, _ = db.ExecContext(ctx, "SET @@dolt_force_transaction_commit = 0")
+	}()
+
+	_, mergeErr := db.ExecContext(ctx, "CALL DOLT_MERGE('--author', ?, ?)", author, branch)
+	// Conflicts can surface as an error OR be left in the working set without one — check either way.
+	conflicts, conflictErr := GetConflicts(ctx, db)
+	if conflictErr == nil && len(conflicts) > 0 {
+		abortMerge(ctx, db, preClean)
+		return conflicts, nil
+	}
+	if mergeErr != nil {
+		abortMerge(ctx, db, preClean)
+		return nil, fmt.Errorf("merge branch %s: %w", branch, mergeErr)
 	}
 	return nil, nil
 }

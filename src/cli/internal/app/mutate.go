@@ -9,6 +9,7 @@ import (
 	"database/sql"
 	"fmt"
 	"os"
+	"strings"
 
 	"github.com/endermalkoc/cusp/internal/storage/versioncontrolops"
 	"github.com/endermalkoc/cusp/internal/store"
@@ -63,6 +64,18 @@ func Mutate(ctx context.Context, ws *workspace.Workspace, o MutateOpts, body fun
 		return fmt.Errorf("selecting branch %q: %w", branch, err)
 	}
 
+	// 3b. Preflight: refuse to run over a dirty working set. Step 6 stages whole tables (DOLT_ADD
+	//     per table), so pre-existing uncommitted changes — from a prior failed command, raw SQL,
+	//     or a manual Dolt operation — would otherwise be committed under this command's
+	//     actor/message. A normal command always leaves a clean working set, so dirt here is a
+	//     symptom the operator must resolve first.
+	if dirty, err := versioncontrolops.DirtyWorkingSet(ctx, conn); err != nil {
+		return fmt.Errorf("checking working set on %q: %w", branch, err)
+	} else if len(dirty) > 0 {
+		return fmt.Errorf("branch %q has uncommitted changes (%s); commit, discard, or reset them before running this command",
+			branch, strings.Join(dirty, ", "))
+	}
+
 	// 4. Validate before touching anything, reading the now-current target branch.
 	if o.Validate != nil {
 		if err := o.Validate(ctx, conn); err != nil {
@@ -99,6 +112,11 @@ func Mutate(ctx context.Context, ws *workspace.Workspace, o MutateOpts, body fun
 	parentHash, _ := headCommitHash(ctx, conn)
 	dirtyTables := w.dirty.DirtyTables()
 	if err := versioncontrolops.StageAndCommit(ctx, conn, dirtyTables, o.Summary, actor.CommitAuthorString()); err != nil {
+		// The SQL tx already committed the row writes into the working set; the Dolt commit failed,
+		// so discard them — leave the branch clean rather than wedged with this command's
+		// uncommitted changes (which the next command's preflight would refuse). Safe because the
+		// preflight above guaranteed the working set was clean before the body ran.
+		versioncontrolops.DiscardWorkingSet(ctx, conn)
 		return fmt.Errorf("committing change: %w", err)
 	}
 

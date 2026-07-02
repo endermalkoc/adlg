@@ -66,6 +66,56 @@ pre-release.
   changeset. `changeset ls` reads `main` (changeset metadata lives there); `generate` reads `main`
   (the canonical build).
 
+### Review & collaboration (changeset review — Step 1)
+
+- **`cusp comment` / `cusp review` — the review verbs** ([comment.go](../src/cli/cmd/cusp/comment.go),
+  [review.go](../src/cli/cmd/cusp/review.go), [store/review.go](../src/cli/internal/store/review.go)). Wires
+  the long-modeled [Review layer](entities/review.md) into the CLI so a reviewer (human via the extension,
+  or an agent via the shell) can drive a changeset review. **`cusp comment`** — `add`/`ls`/`show`/`resolve`/
+  `reopen`/`edit`/`delete`: a comment attaches to a changeset (positional branch or the active one),
+  optionally **anchored** to a `--subject TYPE:key` (resolved against the *changeset branch*, since a
+  changeset-new entity isn't on `main` yet) with a free-form `--locator`, and threads via `--reply <id>`;
+  `requirement`/`spec`/`entity` resolve from a token, `user_story`/`test_case`/`deliverable` take the explicit
+  `--subject-type`/`--subject-id` pair. **`cusp review --verdict approve|deny|request_changes [--summary]`**
+  (+`review ls`) upserts one verdict per reviewer per changeset (deterministic id → idempotent, merge-safe)
+  **and** moves the changeset `status` (`approve→approved`, `request_changes→changes_requested`,
+  `deny→denied`); merge/abandon stay with the `changeset` verbs. **Where they run:** the `Comment`/`Review`
+  rows must live on `main` (else they'd merge away with the change), so both verbs route through a
+  `runMutateOnMain` wrapper that pins `main` regardless of the active changeset — reusing the whole command
+  contract (validate → tx+retry → attributed Dolt commit → `--dry-run`). Verified end-to-end against real
+  Dolt: a comment on a changeset-new requirement, threaded replies, resolve/`--unresolved`, a verdict upsert
+  (one row) with status sync, and — the invariant — the `rev_comment`/`rev_review` rows **surviving the
+  changeset's merge** on `main`, with the anchor uuid still resolving. `verdict`/`subject_type` are closed
+  enums (unit-tested).
+- **Per-entity changeset diff — `cusp changeset diff --entities`** ([app/diff.go](../src/cli/internal/app/diff.go)).
+  Grows the diff from today's table-level row counts (`workspace.Diff`) to an **`EntityDiff` list** — per
+  changed requirement/spec/user_story/entity/deliverable/test_case: its subject (`type`+`id`+display ref),
+  `changeType` (added/modified/removed), and the per-field base→head values — so a review surface can anchor
+  a comment to a concrete row and field. Reuses the auto-gen `dolt_diff` plumbing (`quoteRef`), pairs the
+  `to_/from_` columns dynamically (no static column list), and resolves labels on the changeset branch so
+  changeset-new rows show their `fr_key`. It also carries a self-describing `docRef` (`spec:<ref>` /
+  `entity:<name>`) and rolls section/child changes up to their owning doc. The head ref is the branch while it
+  exists, else the recorded `head_commit`/`merge_commit` (both survive branch deletion), so a **merged**
+  changeset stays reviewable and an **abandoned-before-submit** one fails cleanly with a coded `not_found`
+  instead of a raw Dolt checkout error.
+- **VS Code extension — the review surface (first slice)** ([reviewView.ts](../src/extension/src/changesets/reviewView.ts),
+  [changesetTree.ts](../src/extension/src/changesets/changesetTree.ts)). The changeset tree expands to its
+  changed entities (`diff`), and reviewing a changeset opens VS Code's **native diff editor** (`vscode.diff`)
+  over two virtual documents — the affected **spec or entity** doc rendered as Markdown at the base (`main`)
+  vs the head (changeset branch), via `cusp spec render`/`cusp entity render --format md --changeset …` — so
+  the gutters, side-by-side/inline toggle, navigation and coloring are VS Code's, not hand-rolled. Review
+  comments hang off the head side as **native Comments API** `CommentThread`s, anchored to a requirement via
+  the rendered `^fr-key` block anchors (a comment binds to a requirement, not a line number), or to the whole
+  entity for an entity doc; reply → `addComment`, resolve/reopen → `resolveComment`, and a **Set Verdict**
+  command → `setReview`. To feed the diff, `EntityDiff` carries a server-resolved `docRef` — a self-describing
+  `spec:<ref>` / `entity:<name>` token — and the client gains `renderDocMarkdown(docRef, branch)` dispatching
+  on it. The diff also **rolls a section/child change up to its owning doc** (`ent_entity_section` → entity,
+  `req_spec_section`/`req_requirement_group`/`req_acceptance_scenario` → spec), so a prose-only edit still
+  opens its doc's diff even though no subject row changed. Fills the transport contract's pending methods
+  (`diff`/`listComments`/`addComment`/`resolveComment`/`setReview`) in the transport-agnostic `client.ts` +
+  `cliClient.ts`, keeping the UI free of `cusp`-process knowledge (MCP-swappable later). The extension holds
+  no state — Dolt stays the source of truth.
+
 ### Generation & cross-references
 
 - **Generate** — `cusp generate --format md|json|html`: DB → git-ignored read artifacts.

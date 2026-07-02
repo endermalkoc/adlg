@@ -64,9 +64,37 @@ const (
 
 var ActorKind = []string{ActorHuman, ActorAgent}
 
-// ReviewVerdict — rev_review.verdict. Defined for documentation/parity; the review CLI
-// that would set it is not built yet (see ROADMAP), so nothing references it today.
-var ReviewVerdict = []string{"approve", "deny", "request_changes"}
+// ReviewVerdict — rev_review.verdict. Set by `cusp review`; a closed set (hard-validated
+// via app.ValidateEnum). The verbs reference these constants instead of bare literals.
+const (
+	VerdictApprove        = "approve"
+	VerdictDeny           = "deny"
+	VerdictRequestChanges = "request_changes"
+)
+
+var ReviewVerdict = []string{VerdictApprove, VerdictDeny, VerdictRequestChanges}
+
+// CommentSubjectType — rev_comment.subject_type (nullable). The polymorphic anchor a review
+// comment can bind to; a closed set (hard-validated when present). NULL = a changeset-level
+// comment with no subject. requirement/spec/entity are resolvable from a [[TYPE:key]] token
+// today; user_story/test_case/deliverable are addressed by explicit type+id until they gain
+// ref tokens.
+var CommentSubjectType = []string{"requirement", "spec", "user_story", "test_case", "entity", "deliverable"}
+
+// StatusForVerdict maps a review verdict to the changeset status it implies:
+// approve→approved, request_changes→changes_requested, deny→denied. (merged/closed stay owned
+// by the changeset merge/abandon verbs.) Returns "" for an unrecognized verdict.
+func StatusForVerdict(verdict string) string {
+	switch verdict {
+	case VerdictApprove:
+		return ChangesetApproved
+	case VerdictRequestChanges:
+		return ChangesetChangesRequested
+	case VerdictDeny:
+		return ChangesetDenied
+	}
+	return ""
+}
 
 // SEED set — an open value-set with documented defaults, validated leniently
 // (app.ValidateEnumSoft accepts unknowns with a warning; --strict rejects). Seed/policy,

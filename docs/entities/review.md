@@ -63,9 +63,14 @@ verdict each (re-review updates the row).
 | `reviewer_id` | FK → Actor | | |
 | `verdict` | enum | | `approve`, `deny`, `request_changes` |
 | `summary` | text | | |
-| `created_at` | datetime | | |
+| `created_at` / `updated_at` | datetime | | |
 
 > `UNIQUE(changeset_id, reviewer_id)` — one current verdict per reviewer per changeset.
+> The `cusp review` CLI upserts on this key with a **deterministic id** (`ids.Rel(changeset,
+> reviewer)`), so a re-review updates the same row and it converges on merge. Setting a verdict
+> also moves the changeset's `status` (`approve→approved`, `request_changes→changes_requested`,
+> `deny→denied`); `merged`/`closed` stay owned by the `changeset merge`/`abandon` verbs — see
+> [decisions.md](decisions.md).
 
 ## Comment
 Threaded discussion on a changeset, optionally **anchored** to a specific node and location
@@ -83,3 +88,12 @@ within the diff.
 | `locator` | varchar | | Field / diff-hunk locator within the subject; nullable |
 | `resolved` | bool | | |
 | `created_at` / `updated_at` | datetime | | |
+
+> **CLI (`cusp comment`).** `comment add [changeset] --body … [--subject TYPE:key | --subject-type
+> --subject-id] [--locator …] [--reply <id>]`, plus `ls`/`show`/`resolve`/`reopen`/`edit`/`delete`.
+> A `--subject` is resolved against the **changeset branch** (an entity may have been added in the
+> changeset, so it isn't on `main` yet); the resolved `subject_id` is a stable uuid that still
+> anchors after merge. `requirement`/`spec`/`entity` resolve from a `[[TYPE:key]]` token today;
+> `user_story`/`test_case`/`deliverable` use the explicit `--subject-type`/`--subject-id` pair until
+> they gain ref tokens. `locator` is a free-form field/hunk string the review surface sets (e.g. a
+> field name), stored and echoed back but not interpreted by the core.

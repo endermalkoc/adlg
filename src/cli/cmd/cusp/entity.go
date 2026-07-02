@@ -9,6 +9,7 @@ import (
 
 	"github.com/endermalkoc/cusp/internal/app"
 	"github.com/endermalkoc/cusp/internal/enums"
+	"github.com/endermalkoc/cusp/internal/generate"
 	"github.com/endermalkoc/cusp/internal/store"
 )
 
@@ -171,9 +172,152 @@ var entityDeleteCmd = &cobra.Command{
 	},
 }
 
+// --- entity tree: entities with their relationships + sections, for the Entities view ---
+
+type entTreeRel struct {
+	Name        string `json:"name"`
+	DocPath     string `json:"docPath"`
+	Cardinality string `json:"cardinality,omitempty"`
+	Outgoing    bool   `json:"outgoing"`
+}
+
+type entTreeSection struct {
+	Key   string `json:"key"`
+	Title string `json:"title"`
+}
+
+type entTreeNode struct {
+	Name          string           `json:"name"`
+	DocPath       string           `json:"docPath"`
+	Relationships []entTreeRel     `json:"relationships"`
+	Sections      []entTreeSection `json:"sections"`
+}
+
+var entityTreeCmd = &cobra.Command{
+	Use:   "tree",
+	Short: "Print the entities with their relationships and sections",
+	Long: "Emit every entity with its structured relationships (to other entities) and its prose\n" +
+		"sections. Use --json to drive an outline/tree view.",
+	Args: cobra.NoArgs,
+	RunE: func(cmd *cobra.Command, args []string) error {
+		ctx := cmd.Context()
+		rd, done, err := connectRead(ctx)
+		if err != nil {
+			return err
+		}
+		defer done()
+
+		ents, err := store.ListEntities(ctx, rd)
+		if err != nil {
+			return err
+		}
+		out := []entTreeNode{}
+		for _, e := range ents {
+			node := entTreeNode{Name: e.Name, DocPath: e.DocPath, Relationships: []entTreeRel{}, Sections: []entTreeSection{}}
+			rels, err := store.ListEntityRelationships(ctx, rd, e.ID)
+			if err != nil {
+				return err
+			}
+			for _, rel := range rels {
+				node.Relationships = append(node.Relationships, entTreeRel{
+					Name: rel.OtherName, DocPath: rel.OtherDocPath, Cardinality: rel.Cardinality, Outgoing: rel.Outgoing,
+				})
+			}
+			secs, err := store.ListEntitySections(ctx, rd, e.ID)
+			if err != nil {
+				return err
+			}
+			for _, sec := range secs {
+				if sec.Title == "" {
+					continue // headingless (preamble) — not navigable
+				}
+				node.Sections = append(node.Sections, entTreeSection{Key: sec.Key, Title: sec.Title})
+			}
+			out = append(out, node)
+		}
+
+		if flagJSON {
+			emit(out, "")
+			return nil
+		}
+		var b strings.Builder
+		for _, e := range out {
+			fmt.Fprintf(&b, "%s\n", e.Name)
+			if len(e.Relationships) > 0 {
+				fmt.Fprintf(&b, "  Relationships\n")
+				for _, r := range e.Relationships {
+					arrow := "←"
+					if r.Outgoing {
+						arrow = "→"
+					}
+					fmt.Fprintf(&b, "    %s %s (%s)\n", arrow, r.Name, r.Cardinality)
+				}
+			}
+			if len(e.Sections) > 0 {
+				fmt.Fprintf(&b, "  Sections\n")
+				for _, s := range e.Sections {
+					fmt.Fprintf(&b, "    %s\n", s.Title)
+				}
+			}
+		}
+		fmt.Print(b.String())
+		return nil
+	},
+}
+
+var entityRenderFormat string
+
+var entityRenderCmd = &cobra.Command{
+	Use:   "render <name-or-path>",
+	Short: "Render an entity's document (HTML or Markdown) from the DB to stdout",
+	Long: "Render a single entity's document on demand from the database — the render chokepoint\n" +
+		"for the Entities view. Accepts an entity name or its doc path (entities/<slug>.md).\n" +
+		"--format html emits a self-contained, inline-CSS page; --format md the raw Markdown.",
+	Args: cobra.ExactArgs(1),
+	RunE: func(cmd *cobra.Command, args []string) error {
+		ctx := cmd.Context()
+		rd, done, err := connectRead(ctx)
+		if err != nil {
+			return err
+		}
+		defer done()
+		e, ok, err := store.GetEntity(ctx, rd, args[0])
+		if err != nil {
+			return err
+		}
+		if !ok {
+			// Fall back to resolving the arg as a doc path (e.g. entities/student.md) — how the
+			// webview addresses an entity when following a cross-reference link.
+			ents, er := store.ListEntities(ctx, rd)
+			if er != nil {
+				return er
+			}
+			for _, cand := range ents {
+				if cand.DocPath == args[0] || cand.DocPath == args[0]+".md" {
+					e, ok = cand, true
+					break
+				}
+			}
+		}
+		if !ok {
+			return app.NotFound("entity", args[0])
+		}
+		out, err := generate.RenderEntityDoc(ctx, rd, e.ID, e.DocPath, entityRenderFormat)
+		if err != nil {
+			return err
+		}
+		fmt.Print(out)
+		if !strings.HasSuffix(out, "\n") {
+			fmt.Println()
+		}
+		return nil
+	},
+}
+
 func init() {
 	entityEditCmd.Flags().StringVar(&entityDescription, "description", "", "new description")
 	entityEditCmd.Flags().StringVar(&entityStatus, "status", "", "status (draft|active|deprecated)")
-	entityCmd.AddCommand(entityLsCmd, entityShowCmd, entityEditCmd, entityDeleteCmd)
+	entityRenderCmd.Flags().StringVar(&entityRenderFormat, "format", "html", "render format: html | md")
+	entityCmd.AddCommand(entityLsCmd, entityShowCmd, entityTreeCmd, entityRenderCmd, entityEditCmd, entityDeleteCmd)
 	rootCmd.AddCommand(entityCmd)
 }
