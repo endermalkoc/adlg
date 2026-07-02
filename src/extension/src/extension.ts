@@ -11,8 +11,18 @@ export function activate(context: vscode.ExtensionContext): void {
   const changesets = new ChangesetTreeProvider(client);
   const requirements = new RequirementsTreeProvider(client);
   // A TreeView (not just a provider) so we can reveal() — expand + select the node the doc panel
-  // navigates to (link clicks and back/forward included).
-  const reqView = vscode.window.createTreeView("cuspRequirements", { treeDataProvider: requirements });
+  // navigates to (link clicks and back/forward included) — and get a built-in Collapse All button.
+  const reqView = vscode.window.createTreeView("cuspRequirements", {
+    treeDataProvider: requirements,
+    showCollapseAll: true,
+  });
+
+  // Reflect the active filter in the view (a "Filter: …" subtitle + a context key that shows the
+  // Clear button).
+  const applyFilterUI = (q: string) => {
+    reqView.description = q ? `Filter: ${q}` : undefined;
+    void vscode.commands.executeCommand("setContext", "cusp.requirementsFiltered", q.length > 0);
+  };
 
   const revealInTree = async (docPath: string, anchor?: string) => {
     const node = await requirements.find(docPath, anchor);
@@ -30,6 +40,22 @@ export function activate(context: vscode.ExtensionContext): void {
     reqView,
     vscode.commands.registerCommand("cusp.refreshChangesets", () => changesets.refresh()),
     vscode.commands.registerCommand("cusp.refreshRequirements", () => requirements.refresh()),
+    vscode.commands.registerCommand("cusp.searchRequirements", async () => {
+      const q = await vscode.window.showInputBox({
+        prompt: "Filter requirements — matches FR keys, statements, and spec/story/section titles",
+        placeHolder: "e.g. email, invoice, ADDS-FR",
+        value: requirements.filterText,
+      });
+      if (q === undefined) {
+        return; // cancelled — leave the current filter unchanged
+      }
+      requirements.setFilter(q);
+      applyFilterUI(q.trim());
+    }),
+    vscode.commands.registerCommand("cusp.clearRequirementsSearch", () => {
+      requirements.setFilter("");
+      applyFilterUI("");
+    }),
     registerSpecDocView(() => client, revealInTree),
     // Rebuild the transport when the relevant settings change — no reload needed.
     vscode.workspace.onDidChangeConfiguration((e) => {

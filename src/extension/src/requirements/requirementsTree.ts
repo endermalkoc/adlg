@@ -25,6 +25,8 @@ export class RequirementsTreeProvider implements vscode.TreeDataProvider<Node> {
   readonly onDidChangeTreeData = this._onDidChangeTreeData.event;
   private roots: Node[] | undefined;
   private loading: Promise<Node[]> | undefined;
+  private filter = "";
+  private visible: Set<string> | undefined; // node ids kept under the active filter (undefined = no filter)
 
   constructor(private client: CuspClient) {}
 
@@ -35,15 +37,31 @@ export class RequirementsTreeProvider implements vscode.TreeDataProvider<Node> {
   refresh(): void {
     this.roots = undefined;
     this.loading = undefined;
+    this.visible = undefined; // recomputed against the reloaded tree; the filter itself persists
+    this._onDidChangeTreeData.fire();
+  }
+
+  get filterText(): string {
+    return this.filter;
+  }
+
+  // setFilter narrows the tree to nodes matching q (by label + description) and their ancestors;
+  // empty clears it. The visible set is (re)computed on the next root fetch.
+  setFilter(q: string): void {
+    this.filter = q.trim().toLowerCase();
+    this.visible = undefined;
     this._onDidChangeTreeData.fire();
   }
 
   getTreeItem(node: Node): vscode.TreeItem {
     const leaf = node.kind === "req" || node.kind === "story" || node.kind === "section";
-    const item = new vscode.TreeItem(
-      node.label,
-      leaf ? vscode.TreeItemCollapsibleState.None : vscode.TreeItemCollapsibleState.Collapsed,
-    );
+    // While filtering, expand the branches leading to matches so results are visible.
+    const state = leaf
+      ? vscode.TreeItemCollapsibleState.None
+      : this.visible
+        ? vscode.TreeItemCollapsibleState.Expanded
+        : vscode.TreeItemCollapsibleState.Collapsed;
+    const item = new vscode.TreeItem(node.label, state);
     item.id = node.id;
     item.description = node.description;
     if (node.tooltip) {
@@ -63,11 +81,44 @@ export class RequirementsTreeProvider implements vscode.TreeDataProvider<Node> {
   }
 
   getChildren(node?: Node): Node[] | Promise<Node[]> {
-    return node ? node.children : this.ensureRoots();
+    if (node) {
+      return this.applyFilter(node.children);
+    }
+    return this.ensureRoots().then((roots) => {
+      if (this.filter && !this.visible) {
+        this.visible = this.computeVisible(roots);
+      }
+      return this.applyFilter(roots);
+    });
   }
 
   getParent(node: Node): Node | undefined {
     return node.parent;
+  }
+
+  private applyFilter(nodes: Node[]): Node[] {
+    return this.visible ? nodes.filter((n) => this.visible!.has(n.id)) : nodes;
+  }
+
+  // computeVisible collects the ids of nodes that match the filter or have a matching descendant.
+  private computeVisible(roots: Node[]): Set<string> {
+    const vis = new Set<string>();
+    const walk = (node: Node): boolean => {
+      let keep = `${node.label} ${node.description ?? ""}`.toLowerCase().includes(this.filter);
+      for (const child of node.children) {
+        if (walk(child)) {
+          keep = true;
+        }
+      }
+      if (keep) {
+        vis.add(node.id);
+      }
+      return keep;
+    };
+    for (const r of roots) {
+      walk(r);
+    }
+    return vis;
   }
 
   // find locates a spec (by doc path) or, when an anchor is given, the FR under it (searched

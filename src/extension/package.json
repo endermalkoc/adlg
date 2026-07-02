@@ -61,6 +61,18 @@
         "icon": "$(refresh)"
       },
       {
+        "command": "cusp.searchRequirements",
+        "title": "Search Requirements",
+        "category": "Cusp",
+        "icon": "$(search)"
+      },
+      {
+        "command": "cusp.clearRequirementsSearch",
+        "title": "Clear Requirements Search",
+        "category": "Cusp",
+        "icon": "$(close)"
+      },
+      {
         "command": "cusp.specDocBack",
         "title": "Back",
         "category": "Cusp",
@@ -83,9 +95,19 @@
           "group": "navigation"
         },
         {
+          "command": "cusp.searchRequirements",
+          "when": "view == cuspRequirements",
+          "group": "navigation@1"
+        },
+        {
+          "command": "cusp.clearRequirementsSearch",
+          "when": "view == cuspRequirements && cusp.requirementsFiltered",
+          "group": "navigation@2"
+        },
+        {
           "command": "cusp.refreshRequirements",
           "when": "view == cuspRequirements",
-          "group": "navigation"
+          "group": "navigation@3"
         }
       ],
       "editor/title": [
